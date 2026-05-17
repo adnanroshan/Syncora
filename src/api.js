@@ -105,6 +105,72 @@ export async function listUserProductsModules(userid) {
   }
 }
 
+/* Eligibility lookups for the Assignees picker. Each returns the raw
+ * access rows for a given scope; the caller intersects userids to figure
+ * out who can be assigned. Always [] on error so the picker just shows
+ * no candidates rather than throwing. */
+export async function listOrgAccessRows(organisationid) {
+  if (organisationid == null) return [];
+  const filter = `(organisationid=${organisationid})`;
+  try {
+    const r = await restful({ url: `~/v2/userorgs?filter=${encodeURIComponent(filter)}` });
+    return r?.collection || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listProductAccessRows(productid) {
+  if (productid == null) return [];
+  const filter = `(productid=${productid})`;
+  try {
+    const r = await restful({ url: `~/v2/userproductsmodules?filter=${encodeURIComponent(filter)}` });
+    return r?.collection || [];
+  } catch {
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------ *
+ * Task assignees                                                 *
+ * Composite key on the resource is `taskid,assigneduserid`.      *
+ * ------------------------------------------------------------ */
+export async function listAssignees(taskid) {
+  if (taskid == null) return [];
+  const filter = `(taskid=${taskid})`;
+  try {
+    const r = await restful({ url: `~/v2/taskassignees?filter=${encodeURIComponent(filter)}` });
+    return r?.collection || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addAssignee({ taskid, assigneduserid, isprimary = false }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskassignees',
+    body: { taskid, assigneduserid, isprimary },
+  });
+}
+
+export async function removeAssignee(taskid, assigneduserid) {
+  const key = `${taskid},${assigneduserid}`;
+  return restful({
+    method: 'DELETE',
+    url: `~/v2/taskassignees/${encodeURIComponent(key)}`,
+  });
+}
+
+export async function setPrimaryAssignee(taskid, assigneduserid) {
+  const key = `${taskid},${assigneduserid}`;
+  return restful({
+    method: 'PATCH',
+    url: `~/v2/taskassignees/${encodeURIComponent(key)}`,
+    body: { isprimary: true },
+  });
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
@@ -158,8 +224,9 @@ const MOCK = {
   modules:              SEED.modules,
   taskgroups:           SEED.taskgroups,
   users:                SEED.users,
-  userOrgs:             SEED.userOrgs,
-  userProductsModules:  SEED.userProductsModules,
+  userOrgs:             SEED.userOrgs.slice(),
+  userProductsModules:  SEED.userProductsModules.slice(),
+  taskAssignees:        (SEED.taskAssignees || []).slice(),
   nextId:               Math.max(...SEED.tasks.map(t => t.taskid)) + 1,
 };
 
@@ -209,15 +276,73 @@ function handleMock({ method = 'GET', url, body } = {}) {
   }
   if (method === 'GET' && path === '/v2/userorgs') {
     const q = decodeURIComponent(String(url).split('?')[1] || '');
-    const m = q.match(/userid=(\d+)/);
-    const filtered = m ? MOCK.userOrgs.filter(r => r.userid === parseInt(m[1], 10)) : MOCK.userOrgs;
+    const byUser = q.match(/userid=(\d+)/);
+    const byOrg  = q.match(/organisationid=(\d+)/);
+    let filtered = MOCK.userOrgs;
+    if (byUser) filtered = filtered.filter(r => r.userid === parseInt(byUser[1], 10));
+    if (byOrg)  filtered = filtered.filter(r => r.organisationid === parseInt(byOrg[1], 10));
     return { collection: filtered };
   }
   if (method === 'GET' && path === '/v2/userproductsmodules') {
     const q = decodeURIComponent(String(url).split('?')[1] || '');
-    const m = q.match(/userid=(\d+)/);
-    const filtered = m ? MOCK.userProductsModules.filter(r => r.userid === parseInt(m[1], 10)) : MOCK.userProductsModules;
+    const byUser    = q.match(/userid=(\d+)/);
+    const byProduct = q.match(/productid=(\d+)/);
+    const byModule  = q.match(/moduleid=(\d+)/);
+    let filtered = MOCK.userProductsModules;
+    if (byUser)    filtered = filtered.filter(r => r.userid === parseInt(byUser[1], 10));
+    if (byProduct) filtered = filtered.filter(r => r.productid === parseInt(byProduct[1], 10));
+    if (byModule)  filtered = filtered.filter(r => r.moduleid === parseInt(byModule[1], 10));
     return { collection: filtered };
+  }
+
+  /* Task assignees (composite key taskid,assigneduserid) */
+  if (method === 'GET' && path === '/v2/taskassignees') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const byTask = q.match(/taskid=(\d+)/);
+    let rows = MOCK.taskAssignees;
+    if (byTask) rows = rows.filter(r => r.taskid === parseInt(byTask[1], 10));
+    return { collection: rows.map(decorateAssignee) };
+  }
+  if (method === 'POST' && path === '/v2/taskassignees') {
+    const exists = MOCK.taskAssignees.find(
+      r => r.taskid === body.taskid && r.assigneduserid === body.assigneduserid
+    );
+    if (exists) throw mkError(409, 'duplicate', 'Assignee already exists');
+    if (body.isprimary) {
+      MOCK.taskAssignees = MOCK.taskAssignees.map(r =>
+        r.taskid === body.taskid ? { ...r, isprimary: false } : r
+      );
+    }
+    const row = { taskid: body.taskid, assigneduserid: body.assigneduserid, isprimary: !!body.isprimary };
+    MOCK.taskAssignees.push(row);
+    return decorateAssignee(row);
+  }
+  if (method === 'DELETE' && path.startsWith('/v2/taskassignees/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [taskidStr, userIdStr] = key.split(',');
+    const tid = parseInt(taskidStr, 10);
+    const uid = parseInt(userIdStr, 10);
+    MOCK.taskAssignees = MOCK.taskAssignees.filter(
+      r => !(r.taskid === tid && r.assigneduserid === uid)
+    );
+    return {};
+  }
+  if (method === 'PATCH' && path.startsWith('/v2/taskassignees/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [taskidStr, userIdStr] = key.split(',');
+    const tid = parseInt(taskidStr, 10);
+    const uid = parseInt(userIdStr, 10);
+    if (body.isprimary) {
+      MOCK.taskAssignees = MOCK.taskAssignees.map(r =>
+        r.taskid === tid ? { ...r, isprimary: r.assigneduserid === uid } : r
+      );
+    } else {
+      MOCK.taskAssignees = MOCK.taskAssignees.map(r =>
+        (r.taskid === tid && r.assigneduserid === uid) ? { ...r, ...body } : r
+      );
+    }
+    const row = MOCK.taskAssignees.find(r => r.taskid === tid && r.assigneduserid === uid);
+    return row ? decorateAssignee(row) : {};
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {
@@ -225,6 +350,11 @@ function handleMock({ method = 'GET', url, body } = {}) {
   }
 
   throw mkError(404, 'no_route', `Mock: no route for ${method} ${path}`);
+}
+
+function decorateAssignee(r) {
+  const u = MOCK.users.find(x => x.userid === r.assigneduserid);
+  return { ...r, assignedusername: u?.username || u?.name || `User ${r.assigneduserid}` };
 }
 
 function decorateTask(t) {

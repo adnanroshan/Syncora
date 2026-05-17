@@ -14,6 +14,7 @@ import {
   fmtFullDate, fmtFullDateTime, labelize, normaliseStatus, statusLabel
 } from './Shared.jsx';
 import { DueDatePicker } from './DueDatePicker.jsx';
+import { AssigneesField } from './AssigneesField.jsx';
 
 export function DetailPanel({
   taskId, draftTask, creating,
@@ -298,6 +299,19 @@ export function DetailPanel({
                   ]}
                   onPick={(v) => { patch('createdbyuserid', v ?? null); setOpenPicker(null); }}
                   render={(opt) => <><Avatar name={opt.label || '·'} size={16}/><span>{opt.label}</span></>}
+                />
+              </SideField>
+
+              <SideField label="Assignees">
+                <AssigneesField
+                  taskId={task.taskid}
+                  organisationid={task.organisationid}
+                  productid={task.productid}
+                  moduleid={task.moduleid}
+                  users={lookups?.users || []}
+                  usersById={usersById || {}}
+                  api={api}
+                  disabled={isDraft}
                 />
               </SideField>
 

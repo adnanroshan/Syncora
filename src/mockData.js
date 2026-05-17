@@ -210,6 +210,18 @@ const userOrgs = [
   { userid: 8, organisationid: 1, isprimary: true,  organisationName: 'Northwind Health' },
   { userid: 8, organisationid: 3, isprimary: false, organisationName: 'Larkfield Bank'   },
   { userid: 8, organisationid: 6, isprimary: false, organisationName: 'Internal'         },
+
+  /* Cross-user access — drives the assignee eligibility picker.
+   * Each user that historically created a task in an org gets access
+   * to that org so they remain assignable; a few extras are added so
+   * the picker shows realistic alternatives. */
+  { userid: 1, organisationid: 1 }, { userid: 1, organisationid: 4 }, { userid: 1, organisationid: 6 },
+  { userid: 2, organisationid: 1 }, { userid: 2, organisationid: 5 }, { userid: 2, organisationid: 6 },
+  { userid: 3, organisationid: 1 }, { userid: 3, organisationid: 5 },
+  { userid: 4, organisationid: 1 }, { userid: 4, organisationid: 5 }, { userid: 4, organisationid: 6 },
+  { userid: 5, organisationid: 2 },
+  { userid: 6, organisationid: 3 }, { userid: 6, organisationid: 6 },
+  { userid: 7, organisationid: 4 }, { userid: 7, organisationid: 6 },
 ];
 
 const userProductsModules = [
@@ -221,6 +233,34 @@ const userProductsModules = [
   { userid: 8, productid: 2, moduleid: 4, canread: true, canwrite: true,  candelete: false, productname: 'Clinician Tablet',  modulename: 'Charting'   },
   // Retail Banking App (product 4) — write access to Transfers
   { userid: 8, productid: 4, moduleid: 8, canread: true, canwrite: true,  candelete: false, productname: 'Retail Banking App', modulename: 'Transfers'  },
+
+  /* Cross-user access. canread=true on every row so the picker (which
+   * gates on "any access") includes them; canwrite varies to mirror
+   * real ACL spread. */
+  { userid: 1, productid: 1, moduleid: 1, canread: true, canwrite: true  },
+  { userid: 1, productid: 5, moduleid: 11, canread: true, canwrite: true },
+  { userid: 2, productid: 1, moduleid: 3, canread: true, canwrite: true  },
+  { userid: 2, productid: 6, moduleid: 12, canread: true, canwrite: false },
+  { userid: 2, productid: 7, moduleid: 14, canread: true, canwrite: true },
+  { userid: 3, productid: 2, moduleid: 5, canread: true, canwrite: true  },
+  { userid: 3, productid: 6, moduleid: 13, canread: true, canwrite: true },
+  { userid: 4, productid: 2, moduleid: 4, canread: true, canwrite: true  },
+  { userid: 4, productid: 6, moduleid: 12, canread: true, canwrite: false },
+  { userid: 4, productid: 7, moduleid: 14, canread: true, canwrite: true },
+  { userid: 5, productid: 3, moduleid: 6, canread: true, canwrite: true  },
+  { userid: 5, productid: 3, moduleid: 7, canread: true, canwrite: true  },
+  { userid: 6, productid: 4, moduleid: 8, canread: true, canwrite: true  },
+  { userid: 6, productid: 4, moduleid: 9, canread: true, canwrite: true  },
+  { userid: 6, productid: 7, moduleid: 15, canread: true, canwrite: true },
+  { userid: 7, productid: 5, moduleid: 10, canread: true, canwrite: true },
+  { userid: 7, productid: 7, moduleid: 14, canread: true, canwrite: false },
 ];
 
-export const SEED = { users, orgs, products, modules, taskgroups, tasks, userOrgs, userProductsModules };
+/* A couple of pre-seeded assignees so the panel doesn't always look empty. */
+const taskAssignees = [
+  { taskid: 1000, assigneduserid: 1, isprimary: true  },
+  { taskid: 1000, assigneduserid: 8, isprimary: false },
+  { taskid: 1004, assigneduserid: 4, isprimary: true  },
+];
+
+export const SEED = { users, orgs, products, modules, taskgroups, tasks, userOrgs, userProductsModules, taskAssignees };

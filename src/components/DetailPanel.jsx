@@ -271,10 +271,18 @@ export function DetailPanel({
                 <div className="sidefield-btn">
                   <Icon name="calendar" size={13}/>
                   <input
-                    type="date"
+                    type="datetime-local"
                     className="sidefield-date"
-                    value={task.duedate ? String(task.duedate).substring(0, 10) : ''}
-                    onChange={(e) => patch('duedate', e.target.value || null)}
+                    value={toLocalInput(task.duedate)}
+                    min={localNow()}
+                    onChange={(e) => {
+                      const iso = fromLocalInput(e.target.value);
+                      if (iso && new Date(iso) < new Date()) {
+                        alert('Due date cannot be in the past.');
+                        return;
+                      }
+                      patch('duedate', iso);
+                    }}
                   />
                   <span style={{ flex: 1 }}/>
                   <DueChip iso={task.duedate}/>
@@ -430,4 +438,25 @@ function prettyErr(err) {
   if (!err) return 'Unknown error';
   if (err.errors?.[0]) return err.errors[0].message || err.errors[0].reason || 'Error';
   return err.message || String(err);
+}
+
+/* Datetime helpers — <input type="datetime-local"> wants "YYYY-MM-DDTHH:mm"
+ * in *local* time (no zone). We persist ISO 8601 with zone offset so the
+ * backend gets an unambiguous instant. */
+function pad(n) { return String(n).padStart(2, '0'); }
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(value) {
+  if (!value) return null;
+  const d = new Date(value); // input is local time; Date treats it as local
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+function localNow() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

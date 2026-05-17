@@ -1651,11 +1651,8 @@ kbd {
 
 /* Popover ---------------------------------------------------- */
 .ddp-pop {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: -4px;
-  left: -4px;
-  z-index: 20;
+  position: fixed;        /* JS sets top / left / width at runtime */
+  z-index: 60;
   background: var(--surface);
   border: 0.5px solid var(--border);
   border-radius: 9px;
@@ -1664,7 +1661,6 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 260px;
 }
 
 /* Quick picks ------------------------------------------------ */

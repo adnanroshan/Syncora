@@ -21,13 +21,24 @@
  *    - Snaps minutes to the nearest 15-minute step in the dropdown.
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { Icon } from './Icons.jsx';
 import { DueChip } from './Shared.jsx';
 
+/* Popover dimensions — kept in sync with CSS in duedatepicker.css.
+ * Used to position the floating popover with `position: fixed` so it
+ * escapes the side-rail's `overflow: auto` clipping. */
+const POP_WIDTH  = 280;
+const POP_HEIGHT = 400;
+const POP_GAP    = 6;
+const VIEWPORT_MARGIN = 8;
+
 export function DueDatePicker({ value, onChange, allowPast = false }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
+  const rootRef    = useRef(null);
+  const triggerRef = useRef(null);
+  const popRef     = useRef(null);
+  const [popStyle, setPopStyle] = useState({ position: 'fixed', top: 0, left: 0, width: POP_WIDTH, visibility: 'hidden' });
 
   const current = value ? new Date(value) : null;
   const validCurrent = current && !isNaN(current.getTime()) ? current : null;
@@ -49,6 +60,47 @@ export function DueDatePicker({ value, onChange, allowPast = false }) {
     setViewYear(d.getFullYear());
     setViewMonth(d.getMonth());
   }, [open]); // eslint-disable-line
+
+  /* Position the popover with `position: fixed` so it escapes the
+   * side-rail's `overflow: auto`. Anchor to the trigger's right edge;
+   * flip above / clamp to viewport when there isn't room. */
+  const reposition = useCallback(() => {
+    const t = triggerRef.current;
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const ph = popRef.current ? popRef.current.offsetHeight : POP_HEIGHT;
+
+    /* Vertical: prefer below; flip above if it would clip. */
+    let top = r.bottom + POP_GAP;
+    if (top + ph > vh - VIEWPORT_MARGIN) {
+      const flipped = r.top - ph - POP_GAP;
+      top = flipped >= VIEWPORT_MARGIN ? flipped : Math.max(VIEWPORT_MARGIN, vh - ph - VIEWPORT_MARGIN);
+    }
+
+    /* Horizontal: align right edge to trigger's right edge, clamp to viewport. */
+    let left = r.right - POP_WIDTH;
+    if (left + POP_WIDTH > vw - VIEWPORT_MARGIN) left = vw - POP_WIDTH - VIEWPORT_MARGIN;
+    if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
+
+    setPopStyle({ position: 'fixed', top, left, width: POP_WIDTH, visibility: 'visible' });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopStyle((s) => ({ ...s, visibility: 'hidden' }));
+      return;
+    }
+    reposition();
+    const onMove = () => reposition();
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open, reposition]);
 
   /* Close on outside click + Escape. */
   useEffect(() => {
@@ -149,6 +201,7 @@ export function DueDatePicker({ value, onChange, allowPast = false }) {
     <div className="ddp" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         className="sidefield-btn ddp-trigger"
         onClick={() => setOpen((o) => !o)}
       >
@@ -158,7 +211,7 @@ export function DueDatePicker({ value, onChange, allowPast = false }) {
       </button>
 
       {open && (
-        <div className="ddp-pop" role="dialog" aria-label="Due date">
+        <div className="ddp-pop" ref={popRef} style={popStyle} role="dialog" aria-label="Due date">
           {/* Quick picks */}
           <div className="ddp-quick">
             <button type="button" onClick={() => pickQuick('today')}>Today</button>

@@ -38,6 +38,7 @@ export default function App({ user, hypermedia, isMock }) {
   const [lookups, setLookups] = useState({ orgs: [], products: [], modules: [], taskgroups: [], users: [] });
   const [loading, setLoad]    = useState(true);
   const [error, setError]     = useState(null);
+  const [creating, setCreating] = useState(false);
 
   const reload = useCallback(async () => {
     setLoad(true); setError(null);
@@ -164,6 +165,8 @@ export default function App({ user, hypermedia, isMock }) {
   }, []);
 
   const onCreate = async () => {
+    if (creating) return; // guard against double-submit (button mash / 'c' keystroke during POST)
+    setCreating(true);
     try {
       const draft = {
         title:       'New task',
@@ -174,9 +177,18 @@ export default function App({ user, hypermedia, isMock }) {
         taskgroupid: lookups.taskgroups[0]?.id ?? lookups.taskgroups[0]?.taskgroupid ?? null,
         usersusername: me?.username ?? null,
       };
-      const created = await api.createTask(draft);
+      let created = await api.createTask(draft);
+      // If the backend's POST didn't persist the assigner (CoT may strip
+      // fields the user has no create-permission on), follow up with a
+      // PATCH so the logged-in user is recorded as the assigner.
+      if (me?.username && !created.usersusername && created.taskid != null) {
+        try {
+          const patched = await api.patchTask(created, { usersusername: me.username });
+          created = { ...created, ...patched };
+        } catch (_) { /* non-fatal — fall through with optimistic decoration */ }
+      }
       // Decorate locally so the assigner shows the logged-in user immediately,
-      // even if the backend's POST response omits usersusername/assignee.
+      // even if the backend response still omits usersusername/assignee.
       const decorated = {
         ...created,
         usersusername: created.usersusername ?? me?.username ?? null,
@@ -186,6 +198,8 @@ export default function App({ user, hypermedia, isMock }) {
       setSelectedId(decorated.taskid);
     } catch (err) {
       alert('Could not create task: ' + prettyErr(err));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -196,12 +210,16 @@ export default function App({ user, hypermedia, isMock }) {
         if (e.key === 'Escape') e.target.blur();
         return;
       }
+      // Ignore modifier-key combos (Ctrl/Cmd+C copy, etc.)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === '/') {
         e.preventDefault();
         document.querySelector('.topbar-search input')?.focus();
       } else if (e.key === 'Escape' && selectedId) {
         setSelectedId(null);
-      } else if (e.key === 'c') {
+      } else if (e.key === 'c' && !selectedId) {
+        // Only create from the list view — never while the detail panel
+        // is open (prevents accidental duplicates while editing a task).
         onCreate();
       } else if (selectedId && (e.key === 'j' || e.key === 'k')) {
         const list = filteredTasks;

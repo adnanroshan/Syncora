@@ -64,18 +64,34 @@ export default function App({ user, hypermedia, isMock }) {
       // mock-mode fixture
       return { username: 'me', name: 'You', hue: 165, isMe: true };
     }
-    // The id_token gives us name/email/sub. We try to map to your tasks'
-    // `usersusername` field via the most likely candidates.
-    const username = user?.raw?.preferred_username || user?.email || user?.sub || null;
-    return user ? {
+    if (!user) return null;
+    // The id_token gives us name/email/sub. Match against the backend's
+    // users lookup so `usersusername` aligns with what the assignee picker
+    // expects (the picker's option values are `u.username`).
+    const candidates = [
+      user?.raw?.preferred_username,
+      user?.email,
+      user?.sub,
+      user?.name,
+    ].filter(Boolean).map(s => String(s).toLowerCase());
+    const matched = (lookups.users || []).find(u => {
+      const fields = [u.username, u.email, u.name].filter(Boolean).map(s => String(s).toLowerCase());
+      return fields.some(f => candidates.includes(f));
+    });
+    const username = matched?.username
+      || user?.raw?.preferred_username
+      || user?.email
+      || user?.sub
+      || null;
+    return {
       username,
-      name:     user.name,
+      name:     matched?.name || user.name,
       email:    user.email,
       picture:  user.picture,
       hue:      hashHue(username),
       isMe:     true,
-    } : null;
-  }, [user, isMock]);
+    };
+  }, [user, isMock, lookups.users]);
 
   /* ------- scope filtering ------- */
   const scopedTasks = useMemo(() => {
@@ -159,8 +175,15 @@ export default function App({ user, hypermedia, isMock }) {
         usersusername: me?.username ?? null,
       };
       const created = await api.createTask(draft);
-      setTasks(prev => [created, ...prev]);
-      setSelectedId(created.taskid);
+      // Decorate locally so the assigner shows the logged-in user immediately,
+      // even if the backend's POST response omits usersusername/assignee.
+      const decorated = {
+        ...created,
+        usersusername: created.usersusername ?? me?.username ?? null,
+        assignee:      created.assignee ?? (me ? { username: me.username, name: me.name, hue: me.hue } : null),
+      };
+      setTasks(prev => [decorated, ...prev]);
+      setSelectedId(decorated.taskid);
     } catch (err) {
       alert('Could not create task: ' + prettyErr(err));
     }

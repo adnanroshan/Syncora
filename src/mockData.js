@@ -3,14 +3,14 @@
    is not available (i.e. you're running outside CodeOnTime). */
 
 const users = [
-  { id: 1, usersid: 1, username: 'mira.chen',    name: 'Mira Chen',     hue: 165 },
-  { id: 2, usersid: 2, username: 'jules.okafor', name: 'Jules Okafor',  hue: 28  },
-  { id: 3, usersid: 3, username: 'aria.singh',   name: 'Aria Singh',    hue: 280 },
-  { id: 4, usersid: 4, username: 'tomas.berg',   name: 'Tomas Berg',    hue: 210 },
-  { id: 5, usersid: 5, username: 'nia.rivers',   name: 'Nia Rivers',    hue: 340 },
-  { id: 6, usersid: 6, username: 'dev.patel',    name: 'Dev Patel',     hue: 50  },
-  { id: 7, usersid: 7, username: 'sasha.ito',    name: 'Sasha Ito',     hue: 130 },
-  { id: 8, usersid: 8, username: 'me',           name: 'You',           hue: 165, isMe: true },
+  { userid: 1, username: 'mira.chen',    name: 'Mira Chen',     hue: 165 },
+  { userid: 2, username: 'jules.okafor', name: 'Jules Okafor',  hue: 28  },
+  { userid: 3, username: 'aria.singh',   name: 'Aria Singh',    hue: 280 },
+  { userid: 4, username: 'tomas.berg',   name: 'Tomas Berg',    hue: 210 },
+  { userid: 5, username: 'nia.rivers',   name: 'Nia Rivers',    hue: 340 },
+  { userid: 6, username: 'dev.patel',    name: 'Dev Patel',     hue: 50  },
+  { userid: 7, username: 'sasha.ito',    name: 'Sasha Ito',     hue: 130 },
+  { userid: 8, username: 'me',           name: 'You',           hue: 165, isMe: true },
 ];
 
 const orgs = [
@@ -179,7 +179,7 @@ const tasks = rawTasks.map((t, i) => {
   const prod = products.find(p => p.id === t.productId);
   const mod  = t.moduleId ? modules.find(m => m.id === t.moduleId) : null;
   const grp  = taskgroups.find(g => g.id === t.groupId);
-  const user = t.userId ? users.find(u => u.id === t.userId) : null;
+  const user = t.userId ? users.find(u => u.userid === t.userId) : null;
   return {
     taskid:           1000 + i,
     title:            t.title,
@@ -197,7 +197,7 @@ const tasks = rawTasks.map((t, i) => {
     productname:      prod?.name,
     moduleid:         t.moduleId,
     modulename:       mod?.name,
-    usersusername:    user?.username,
+    createdbyuserid:  user?.userid ?? null,
     assignee:         user || null,
     orgShort:         org?.short,
   };

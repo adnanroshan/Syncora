@@ -64,6 +64,22 @@ export async function deleteTask(task) {
   return restful({ method: 'DELETE', url });
 }
 
+/* Find a single user by username — used to resolve the logged-in user's
+ * numeric `userid`, which we then write to tasks as `createdbyuserid`.
+ * Returns null on no-match or any error.
+ */
+export async function findUserByUsername(username) {
+  if (!username) return null;
+  const safe = String(username).replace(/'/g, "''");
+  const filter = `(username='${safe}')`;
+  try {
+    const r = await restful({ url: `~/v2/users?filter=${encodeURIComponent(filter)}` });
+    return r?.collection?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
@@ -157,7 +173,13 @@ function handleMock({ method = 'GET', url, body } = {}) {
   if (method === 'GET' && path === '/v2/products')     return { collection: MOCK.products };
   if (method === 'GET' && path === '/v2/modules')      return { collection: MOCK.modules };
   if (method === 'GET' && path === '/v2/taskgroups')   return { collection: MOCK.taskgroups };
-  if (method === 'GET' && path === '/v2/users')        return { collection: MOCK.users };
+  if (method === 'GET' && path === '/v2/users') {
+    // honour ?filter=(username='...') for the findUserByUsername helper
+    const q = String(url).split('?')[1] || '';
+    const m = decodeURIComponent(q).match(/username='([^']*)'/);
+    const filtered = m ? MOCK.users.filter(u => u.username === m[1]) : MOCK.users;
+    return { collection: filtered };
+  }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {
     return { tasks: { _links: { first: { href: '~/v2/tasks' } } } };
@@ -171,7 +193,7 @@ function decorateTask(t) {
   const prod  = MOCK.products.find(p => p.id === t.productid);
   const mod   = t.moduleid ? MOCK.modules.find(m => m.id === t.moduleid) : null;
   const grp   = t.taskgroupid ? MOCK.taskgroups.find(g => g.id === t.taskgroupid) : null;
-  const user  = t.usersusername ? MOCK.users.find(u => u.username === t.usersusername) : null;
+  const user  = t.createdbyuserid != null ? MOCK.users.find(u => u.userid === t.createdbyuserid) : null;
   return {
     ...t,
     organisationname: org?.name || t.organisationname,

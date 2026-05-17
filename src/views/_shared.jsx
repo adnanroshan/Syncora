@@ -55,7 +55,7 @@ export function Row({ t, orgsById, onOpen, isSelected }) {
         <span className="row-org-name">{org?.name || t.organisationname}</span>
       </span>
       <DueChip iso={t.duedate} compact/>
-      <Avatar user={t.assignee} name={t.usersusername} size={20}/>
+      <Avatar user={t.assignee} size={20}/>
     </div>
   );
 }

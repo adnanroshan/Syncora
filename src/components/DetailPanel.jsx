@@ -11,7 +11,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Icon, StatusGlyph } from './Icons.jsx';
 import {
   Avatar, OrgMark, PriorityMark, DueChip,
-  fmtFullDate, labelize, normaliseStatus, statusLabel
+  fmtFullDate, fmtFullDateTime, labelize, normaliseStatus, statusLabel
 } from './Shared.jsx';
 import { DueDatePicker } from './DueDatePicker.jsx';
 
@@ -426,12 +426,25 @@ function DescriptionBlock({ task, onSave }) {
 
 /* ---------- audit footer ---------- */
 function Audit({ task, assignee }) {
-  if (!assignee) return null;
-  const who = assignee.name || assignee.username;
+  if (!assignee && !task.lastmodifieddate) return null;
+  const who = assignee?.name || assignee?.username;
   return (
     <div className="audit">
-      <span>Assigned to {who}{task.creationdate ? ` · ${fmtFullDate(task.creationdate)}` : ''}</span>
-      {task.lastmodifieddate && <span>Updated {fmtFullDate(task.lastmodifieddate)}</span>}
+      {who && (
+        <div className="audit-row">
+          <span className="audit-label">Assigned by</span>
+          <span className="audit-value">
+            {who}
+            {task.creationdate ? ` · ${fmtFullDate(task.creationdate)}` : ''}
+          </span>
+        </div>
+      )}
+      {task.lastmodifieddate && (
+        <div className="audit-row">
+          <span className="audit-label">Last updated at</span>
+          <span className="audit-value">{fmtFullDateTime(task.lastmodifieddate)}</span>
+        </div>
+      )}
     </div>
   );
 }

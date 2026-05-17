@@ -118,15 +118,6 @@ export function DetailPanel({
     else         onClose();
   };
 
-  if (!taskId && !isDraft) return null;
-
-  const org   = task ? orgsById[task.organisationid] : null;
-  const prod  = task ? productsById[task.productid]   : null;
-  const mod   = task ? modulesById[task.moduleid]     : null;
-  const group = task ? taskgroupsById[task.taskgroupid] : null;
-  const status = task ? normaliseStatus(task.status) : null;
-  const assignee = task ? (usersById?.[task.createdbyuserid] || null) : null;
-
   /* Modules the user can write against, scoped to the currently-selected
    * product. Deduped by moduleid because the userproductsmodules table
    * could in theory have repeats. */
@@ -149,6 +140,15 @@ export function DetailPanel({
     () => (lookups?.userProductsModules || []).some(r => r.canwrite),
     [lookups?.userProductsModules],
   );
+
+  if (!taskId && !isDraft) return null;
+
+  const org   = task ? orgsById[task.organisationid] : null;
+  const prod  = task ? productsById[task.productid]   : null;
+  const mod   = task ? modulesById[task.moduleid]     : null;
+  const group = task ? taskgroupsById[task.taskgroupid] : null;
+  const status = task ? normaliseStatus(task.status) : null;
+  const assignee = task ? (usersById?.[task.createdbyuserid] || null) : null;
 
   return (
     <>

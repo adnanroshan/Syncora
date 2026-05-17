@@ -1378,18 +1378,6 @@ kbd {
 .sidefield-popitem:hover { background: var(--surface-hover); }
 .sidefield-popitem > svg { flex-shrink: 0; }
 
-/* inline date input in sidefield */
-.sidefield-date {
-  background: transparent;
-  border: none;
-  font: inherit;
-  color: var(--text);
-  padding: 0;
-  width: 100px;
-  cursor: pointer;
-}
-.sidefield-date:focus { outline: none; }
-
 /* editable description textarea */
 .detail-desc-input {
   width: 100%;
@@ -1636,3 +1624,242 @@ kbd {
   font-family: inherit;
 }
 .usermenu-item:hover { background: var(--surface-hover); }
+
+/* ============================================================
+ * Due-date picker
+ * ============================================================ */
+
+.ddp {
+  position: relative;
+  width: 100%;
+}
+
+.ddp-trigger {
+  cursor: pointer;
+}
+
+.ddp-trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ddp-trigger-label.ddp-empty {
+  color: var(--text-faint);
+}
+
+/* Popover ---------------------------------------------------- */
+.ddp-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: -4px;
+  left: -4px;
+  z-index: 20;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 9px;
+  box-shadow: var(--shadow-pop, 0 8px 28px rgba(20, 18, 12, 0.12), 0 1px 0 rgba(0,0,0,0.02));
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 260px;
+}
+
+/* Quick picks ------------------------------------------------ */
+.ddp-quick {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+.ddp-quick button {
+  background: var(--bg-elev);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+.ddp-quick button:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* Calendar header ------------------------------------------- */
+.ddp-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+.ddp-month {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: -0.005em;
+}
+.ddp-navbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 0.5px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ddp-navbtn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Day-of-week + grid ---------------------------------------- */
+.ddp-dow,
+.ddp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.ddp-dow {
+  margin-bottom: -2px;
+}
+.ddp-dow > div {
+  text-align: center;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  padding: 4px 0;
+  font-weight: 500;
+}
+
+.ddp-cell {
+  appearance: none;
+  background: transparent;
+  border: 0.5px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+.ddp-cell:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.ddp-cell.ddp-dim {
+  color: var(--text-faint);
+}
+.ddp-cell.ddp-today:not(.ddp-sel) {
+  border-color: var(--border-strong);
+  font-weight: 600;
+}
+.ddp-cell.ddp-sel,
+.ddp-cell.ddp-sel:hover {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+  border-color: var(--accent);
+}
+.ddp-cell.ddp-past {
+  color: var(--text-faint);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Time row --------------------------------------------------- */
+.ddp-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 2px 0;
+  border-top: 0.5px solid var(--border);
+}
+.ddp-time-label {
+  flex: 1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.ddp-time-sep {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.ddp-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-elev);
+  border: 0.5px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.ddp-select:hover {
+  border-color: var(--border-strong);
+}
+.ddp-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* Footer ----------------------------------------------------- */
+.ddp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 0.5px solid var(--border);
+}
+.ddp-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 5px;
+}
+.ddp-clear:hover:not(:disabled) {
+  color: var(--danger, #B0322D);
+  background: var(--danger-bg, #FBE9E9);
+}
+.ddp-clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ddp-done {
+  background: var(--accent);
+  color: #fff;
+  border: 0.5px solid var(--accent);
+  border-radius: 5px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ddp-done:hover {
+  filter: brightness(0.95);
+}

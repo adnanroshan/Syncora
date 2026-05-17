@@ -1,0 +1,364 @@
+/* Sliding detail panel — fetches full task by ID, supports inline title editing,
+   status/priority/assignee/due/group/client/product/module changes via PATCH. */
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { Icon, StatusGlyph } from './Icons.jsx';
+import {
+  Avatar, OrgMark, PriorityMark, DueChip,
+  fmtFullDate, labelize, normaliseStatus, statusLabel
+} from './Shared.jsx';
+
+export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, api, onAfterPatch, onAfterDelete }) {
+  const [task, setTask]     = useState(null);
+  const [loading, setLoad]  = useState(false);
+  const [error, setError]   = useState(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [openPicker, setOpenPicker] = useState(null);  // 'status' | 'priority' | 'assignee' | 'due' | etc.
+
+  /* fetch full task when ID changes */
+  useEffect(() => {
+    if (!taskId) { setTask(null); return; }
+    let cancelled = false;
+    setLoad(true); setError(null);
+    api.getTask(taskId)
+      .then(t => { if (!cancelled) { setTask(t); setTitleDraft(t.title || ''); setEditingTitle(false); } })
+      .catch(err => { if (!cancelled) setError(prettyErr(err)); })
+      .finally(() => { if (!cancelled) setLoad(false); });
+    return () => { cancelled = true; };
+  }, [taskId, api]);
+
+  const siblings = allTasks || [];
+  const idx  = task ? siblings.findIndex(t => t.taskid === task.taskid) : -1;
+  const prev = idx > 0 ? siblings[idx - 1] : null;
+  const next = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
+
+  const orgsById      = useMemo(() => indexBy(lookups?.orgs,       o => o.id ?? o.organisationid), [lookups]);
+  const productsById  = useMemo(() => indexBy(lookups?.products,   p => p.id ?? p.productid),      [lookups]);
+  const modulesById   = useMemo(() => indexBy(lookups?.modules,    m => m.id ?? m.moduleid),       [lookups]);
+  const taskgroupsById = useMemo(() => indexBy(lookups?.taskgroups, g => g.id ?? g.taskgroupid),    [lookups]);
+
+  /* optimistic patch helper */
+  const patch = async (key, value) => {
+    if (!task) return;
+    const optimistic = { ...task, [key]: value };
+    setTask(optimistic);
+    try {
+      const saved = await api.patchTask(task, { [key]: value });
+      setTask(prev => ({ ...prev, ...saved }));
+      onAfterPatch?.({ ...task, [key]: value, ...saved });
+    } catch (err) {
+      setTask(task);
+      alert('Could not save: ' + prettyErr(err));
+    }
+  };
+
+  const onSaveTitle = () => {
+    setEditingTitle(false);
+    if (titleDraft !== task?.title) patch('title', titleDraft);
+  };
+
+  const onDelete = async () => {
+    if (!task) return;
+    if (!confirm('Delete this task? This cannot be undone.')) return;
+    try {
+      await api.deleteTask(task);
+      onAfterDelete?.(task);
+      onClose();
+    } catch (err) {
+      alert('Could not delete: ' + prettyErr(err));
+    }
+  };
+
+  if (!taskId) return null;
+
+  const org   = task ? orgsById[task.organisationid] : null;
+  const prod  = task ? productsById[task.productid]   : null;
+  const mod   = task ? modulesById[task.moduleid]     : null;
+  const group = task ? taskgroupsById[task.taskgroupid] : null;
+  const status = task ? normaliseStatus(task.status) : null;
+
+  return (
+    <>
+      <div className="detail-scrim" onClick={onClose}/>
+      <aside className="detail" role="dialog" aria-label={task?.title || 'Task'}>
+        <header className="detail-head">
+          <div className="detail-head-left">
+            <button className="iconbtn" onClick={onClose} aria-label="Close"><Icon name="close" size={16}/></button>
+            <span className="detail-id">#{taskId}</span>
+            <span className="detail-crumb">
+              {task?.organisationname || '—'} <Icon name="chevron-r" size={11}/> {task?.productname || '—'}
+            </span>
+          </div>
+          <div className="detail-head-right">
+            <button className="iconbtn" onClick={() => prev && onNavigate(prev.taskid)} disabled={!prev} aria-label="Previous"><Icon name="chevron-l" size={15}/></button>
+            <button className="iconbtn" onClick={() => next && onNavigate(next.taskid)} disabled={!next} aria-label="Next"><Icon name="chevron-r" size={15}/></button>
+            <span className="detail-divider"/>
+            <button className="iconbtn" onClick={onDelete} aria-label="Delete"><Icon name="close" size={15}/></button>
+            <button className="iconbtn" aria-label="More"><Icon name="more" size={15}/></button>
+          </div>
+        </header>
+
+        <div className="detail-body">
+          <div className="detail-main">
+            {loading && !task ? (
+              <div className="empty">
+                <div className="empty-title">Loading…</div>
+              </div>
+            ) : error ? (
+              <div className="empty">
+                <div className="empty-title">Could not load task</div>
+                <div className="empty-sub">{error}</div>
+              </div>
+            ) : task ? (
+              <>
+                {editingTitle ? (
+                  <textarea
+                    className="detail-title-input"
+                    autoFocus
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={onSaveTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.target.blur(); }
+                      if (e.key === 'Escape') { setTitleDraft(task.title); setEditingTitle(false); }
+                    }}
+                  />
+                ) : (
+                  <h1 className="detail-title" onClick={() => setEditingTitle(true)} title="Click to edit">
+                    {task.title || '(untitled)'}
+                  </h1>
+                )}
+
+                <DescriptionBlock task={task} onSave={(v) => patch('description', v)} />
+
+                <Audit task={task}/>
+              </>
+            ) : null}
+          </div>
+
+          {task && (
+            <aside className="detail-side">
+              <SideField label="Status">
+                <FieldPickerButton
+                  open={openPicker === 'status'}
+                  onToggle={() => setOpenPicker(openPicker === 'status' ? null : 'status')}
+                  current={
+                    <>
+                      <StatusGlyph status={status} size={13}/>
+                      <span>{statusLabel(status)}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[
+                    { value: 'todo',       label: 'To do' },
+                    { value: 'inprogress', label: 'In progress' },
+                    { value: 'blocked',    label: 'Blocked' },
+                    { value: 'done',       label: 'Done' },
+                  ]}
+                  onPick={(v) => { patch('status', v); setOpenPicker(null); }}
+                  render={(opt) => <><StatusGlyph status={opt.value} size={12}/><span>{opt.label}</span></>}
+                />
+              </SideField>
+
+              <SideField label="Priority">
+                <FieldPickerButton
+                  open={openPicker === 'priority'}
+                  onToggle={() => setOpenPicker(openPicker === 'priority' ? null : 'priority')}
+                  current={
+                    <>
+                      <PriorityMark priority={task.priority}/>
+                      <span>{labelize(task.priority || 'none')}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[
+                    { value: 'urgent', label: 'Urgent' },
+                    { value: 'high',   label: 'High' },
+                    { value: 'medium', label: 'Medium' },
+                    { value: 'low',    label: 'Low' },
+                  ]}
+                  onPick={(v) => { patch('priority', v); setOpenPicker(null); }}
+                  render={(opt) => <><PriorityMark priority={opt.value}/><span>{opt.label}</span></>}
+                />
+              </SideField>
+
+              <SideField label="Assigner">
+                <FieldPickerButton
+                  open={openPicker === 'assignee'}
+                  onToggle={() => setOpenPicker(openPicker === 'assignee' ? null : 'assignee')}
+                  current={
+                    <>
+                      <Avatar user={task.assignee} name={task.usersusername} size={18}/>
+                      <span>{task.assignee?.name || task.usersusername || 'Unassigned'}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[{ value: '', label: 'Unassigned' }, ...(lookups?.users || []).map(u => ({ value: u.username, label: u.username }))]}
+                  onPick={(v) => { patch('usersusername', v || null); setOpenPicker(null); }}
+                  render={(opt) => <><Avatar name={opt.value || '·'} size={16}/><span>{opt.label}</span></>}
+                />
+              </SideField>
+
+              <SideField label="Due date">
+                <div className="sidefield-btn">
+                  <Icon name="calendar" size={13}/>
+                  <input
+                    type="date"
+                    className="sidefield-date"
+                    value={task.duedate ? String(task.duedate).substring(0, 10) : ''}
+                    onChange={(e) => patch('duedate', e.target.value || null)}
+                  />
+                  <span style={{ flex: 1 }}/>
+                  <DueChip iso={task.duedate}/>
+                </div>
+              </SideField>
+
+              <SideField label="Client">
+                <FieldPickerButton
+                  open={openPicker === 'organisationid'}
+                  onToggle={() => setOpenPicker(openPicker === 'organisationid' ? null : 'organisationid')}
+                  current={
+                    <>
+                      {org ? <OrgMark org={org} size={16}/> : <span className="prod-dot" style={{ background: 'var(--text-faint)' }}/>}
+                      <span>{org?.name || task.organisationname || '—'}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[{ value: '', label: 'No client' }, ...(lookups?.orgs || []).map(o => ({ value: o.id ?? o.organisationid, label: o.name }))]}
+                  onPick={(v) => { patch('organisationid', v || null); setOpenPicker(null); }}
+                  render={(opt) => <span>{opt.label}</span>}
+                />
+              </SideField>
+
+              <SideField label="Product">
+                <FieldPickerButton
+                  open={openPicker === 'productid'}
+                  onToggle={() => setOpenPicker(openPicker === 'productid' ? null : 'productid')}
+                  current={
+                    <>
+                      <span className="prod-dot"/>
+                      <span>{prod?.name || task.productname || '—'}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[{ value: '', label: 'No product' }, ...(lookups?.products || []).map(p => ({ value: p.id ?? p.productid, label: p.name }))]}
+                  onPick={(v) => { patch('productid', v || null); setOpenPicker(null); }}
+                  render={(opt) => <span>{opt.label}</span>}
+                />
+              </SideField>
+
+              <SideField label="Module">
+                <div className="sidefield-btn"><span>{mod?.name || task.modulename || '—'}</span></div>
+              </SideField>
+
+              <SideField label="Group">
+                <FieldPickerButton
+                  open={openPicker === 'taskgroupid'}
+                  onToggle={() => setOpenPicker(openPicker === 'taskgroupid' ? null : 'taskgroupid')}
+                  current={
+                    <>
+                      <Icon name="tag" size={13}/>
+                      <span>{group?.name || task.taskgroupname || '—'}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={(lookups?.taskgroups || []).map(g => ({ value: g.id ?? g.taskgroupid, label: g.name }))}
+                  onPick={(v) => { patch('taskgroupid', v || null); setOpenPicker(null); }}
+                  render={(opt) => <span>{opt.label}</span>}
+                />
+              </SideField>
+
+              <div className="side-meta">
+                <div>Created {fmtFullDate(task.creationdate)}</div>
+                <div>Updated {fmtFullDate(task.lastmodifieddate)}</div>
+              </div>
+            </aside>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/* ---------- description block (click to edit, autosave on blur) ---------- */
+function DescriptionBlock({ task, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.description || '');
+  useEffect(() => { setDraft(task.description || ''); setEditing(false); }, [task.taskid]);
+
+  if (editing) {
+    return (
+      <div className="detail-desc">
+        <textarea
+          className="detail-desc-input"
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => { setEditing(false); if (draft !== (task.description || '')) onSave(draft || null); }}
+          placeholder="What needs to be done?"
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="detail-desc" onClick={() => setEditing(true)}>
+      {task.description
+        ? <p>{task.description}</p>
+        : <p className="empty-text">No description. Click to add one.</p>}
+    </div>
+  );
+}
+
+/* ---------- audit footer ---------- */
+function Audit({ task }) {
+  // Hide entirely when there's no real assigner (new tasks, system-created rows)
+  if (!task.usersusername) return null;
+  return (
+    <div className="audit">
+      <span>Assigned by {task.usersusername}{task.creationdate ? ` · ${fmtFullDate(task.creationdate)}` : ''}</span>
+      {task.lastmodifieddate && <span>Updated {fmtFullDate(task.lastmodifieddate)}</span>}
+    </div>
+  );
+}
+
+/* ---------- small layout helpers ---------- */
+function SideField({ label, children }) {
+  return (
+    <div className="sidefield">
+      <div className="sidefield-label">{label}</div>
+      <div className="sidefield-value">{children}</div>
+    </div>
+  );
+}
+
+/* Picker button: closed shows current; open shows option list overlay */
+function FieldPickerButton({ open, onToggle, current, options, onPick, render }) {
+  return (
+    <div style={{ position: 'relative' }}>
+      <button className="sidefield-btn" onClick={onToggle}>{current}</button>
+      {open && (
+        <div className="sidefield-pop">
+          {options.map((opt, i) => (
+            <button key={i} className="sidefield-popitem" onClick={() => onPick(opt.value)}>
+              {render(opt)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- utilities ---------- */
+function indexBy(arr, fn) {
+  const out = {};
+  (arr || []).forEach(x => { const k = fn(x); if (k != null) out[k] = x; });
+  return out;
+}
+
+function prettyErr(err) {
+  if (!err) return 'Unknown error';
+  if (err.errors?.[0]) return err.errors[0].message || err.errors[0].reason || 'Error';
+  return err.message || String(err);
+}

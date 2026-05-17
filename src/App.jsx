@@ -45,6 +45,10 @@ export default function App({ user, hypermedia, isMock }) {
   // In-memory draft for "New task". When non-null, the DetailPanel renders
   // in unsaved mode — no GET/PATCH calls. POST only fires on Create click.
   const [draftTask, setDraftTask] = useState(null);
+  // Per-user access lists. Empty until me.userid resolves. Drives the
+  // Sidebar's Clients section and the Client/Product/Module pickers.
+  const [userOrgs, setUserOrgs] = useState([]);
+  const [userProductsModules, setUserProductsModules] = useState([]);
 
   const reload = useCallback(async () => {
     setLoad(true); setError(null);
@@ -111,8 +115,57 @@ export default function App({ user, hypermedia, isMock }) {
     return () => { cancelled = true; };
   }, [isMock, me?.username, me?.userid]);
 
+  /* Per-user access lists — fetched once `me.userid` is known. Reset when
+   * the user changes (e.g. logout/re-login in the same tab). */
+  useEffect(() => {
+    if (me?.userid == null) { setUserOrgs([]); setUserProductsModules([]); return; }
+    let cancelled = false;
+    Promise.all([
+      api.listUserOrgs(me.userid),
+      api.listUserProductsModules(me.userid),
+    ]).then(([o, p]) => {
+      if (cancelled) return;
+      setUserOrgs(o);
+      setUserProductsModules(p);
+    });
+    return () => { cancelled = true; };
+  }, [me?.userid]);
+
   /* Index users by id so tasks can show the assignee's name/avatar. */
   const usersById = useMemo(() => indexBy(lookups.users, u => u.userid), [lookups.users]);
+
+  /* Orgs the user is allowed to see — drives the Sidebar Clients list and
+   * the Client picker. Falls back to the full org list while the access
+   * call is still in flight, so we don't flash an empty sidebar. */
+  const accessibleOrgIds = useMemo(
+    () => new Set(userOrgs.map(r => r.organisationid)),
+    [userOrgs],
+  );
+  const accessibleOrgs = useMemo(() => {
+    if (!userOrgs.length) return lookups.orgs;
+    return lookups.orgs.filter(o => accessibleOrgIds.has(o.id ?? o.organisationid));
+  }, [lookups.orgs, userOrgs, accessibleOrgIds]);
+
+  /* Distinct products the user can write tasks against. Derived from the
+   * userproductsmodules rows where canwrite=true. */
+  const accessibleProducts = useMemo(() => {
+    const map = new Map();
+    userProductsModules.forEach(r => {
+      if (!r.canwrite) return;
+      if (map.has(r.productid)) return;
+      map.set(r.productid, { id: r.productid, productid: r.productid, name: r.productname });
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [userProductsModules]);
+
+  /* Single object passed to DetailPanel so its prop surface stays small. */
+  const detailLookups = useMemo(() => ({
+    ...lookups,
+    userOrgs,
+    userProductsModules,
+    accessibleOrgs,
+    accessibleProducts,
+  }), [lookups, userOrgs, userProductsModules, accessibleOrgs, accessibleProducts]);
 
   /* Decorate every task with its assignee record, derived from createdbyuserid. */
   const decoratedTasks = useMemo(
@@ -281,7 +334,7 @@ export default function App({ user, hypermedia, isMock }) {
         onSelect={setScope}
         scopeCount={tasks.length}
         byOrg={byOrg}
-        orgs={lookups.orgs}
+        orgs={accessibleOrgs}
         collapsed={prefs.sidebarCollapsed}
         me={me}
         inboxCount={3}
@@ -336,7 +389,7 @@ export default function App({ user, hypermedia, isMock }) {
         onDiscardDraft={onDiscardDraft}
         onCommitDraft={onCommitDraft}
         allTasks={filteredTasks}
-        lookups={lookups}
+        lookups={detailLookups}
         usersById={usersById}
         api={api}
         onAfterPatch={onAfterPatch}

@@ -63,19 +63,24 @@ export function DetailPanel({
 
   /* Field-change helper. In draft mode it just updates local state. In
    * saved mode it does an optimistic PATCH against the backend. */
-  const patch = async (key, value) => {
+  const patch = async (key, value) => patchMany({ [key]: value });
+
+  /* Multi-key variant — used when one user action needs to update two
+   * fields atomically (e.g. changing the product also clears the
+   * module so we never end up with a mismatched pair on the wire). */
+  const patchMany = async (changes) => {
     if (!task) return;
     if (isDraft) {
-      setTask(t => ({ ...t, [key]: value }));
+      setTask(t => ({ ...t, ...changes }));
       return;
     }
     const before = task;
-    const optimistic = { ...task, [key]: value };
+    const optimistic = { ...task, ...changes };
     setTask(optimistic);
     try {
-      const saved = await api.patchTask(before, { [key]: value });
+      const saved = await api.patchTask(before, changes);
       setTask(p => ({ ...p, ...saved }));
-      onAfterPatch?.({ ...before, [key]: value, ...saved });
+      onAfterPatch?.({ ...before, ...changes, ...saved });
     } catch (err) {
       setTask(before);
       alert('Could not save: ' + prettyErr(err));
@@ -122,6 +127,29 @@ export function DetailPanel({
   const status = task ? normaliseStatus(task.status) : null;
   const assignee = task ? (usersById?.[task.createdbyuserid] || null) : null;
 
+  /* Modules the user can write against, scoped to the currently-selected
+   * product. Deduped by moduleid because the userproductsmodules table
+   * could in theory have repeats. */
+  const availableModules = useMemo(() => {
+    if (!task?.productid) return [];
+    const map = new Map();
+    (lookups?.userProductsModules || []).forEach(r => {
+      if (r.productid !== task.productid) return;
+      if (!r.canwrite) return;
+      if (r.moduleid == null) return;
+      if (map.has(r.moduleid)) return;
+      map.set(r.moduleid, { value: r.moduleid, label: r.modulename });
+    });
+    return Array.from(map.values()).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  }, [lookups?.userProductsModules, task?.productid]);
+
+  /* "Can the user create any task at all?" — used to gate the Create
+   * button in draft mode with a tooltip explaining why it's disabled. */
+  const canCreate = useMemo(
+    () => (lookups?.userProductsModules || []).some(r => r.canwrite),
+    [lookups?.userProductsModules],
+  );
+
   return (
     <>
       <div className="detail-scrim" onClick={handleClose}/>
@@ -137,7 +165,12 @@ export function DetailPanel({
           <div className="detail-head-right">
             {isDraft ? (
               <>
-                <button className="btn-primary" onClick={onCreateClick} disabled={creating || !task?.title?.trim()}>
+                <button
+                  className="btn-primary"
+                  onClick={onCreateClick}
+                  disabled={creating || !task?.title?.trim() || !canCreate}
+                  title={!canCreate ? "You don't have permission to create tasks" : undefined}
+                >
                   <Icon name="plus" size={13}/>
                   <span>{creating ? 'Creating…' : 'Create'}</span>
                 </button>
@@ -286,7 +319,7 @@ export function DetailPanel({
                       <Icon name="chevron-d" size={11}/>
                     </>
                   }
-                  options={[{ value: '', label: 'No client' }, ...(lookups?.orgs || []).map(o => ({ value: o.id ?? o.organisationid, label: o.name }))]}
+                  options={[{ value: '', label: 'No client' }, ...((lookups?.accessibleOrgs) || []).map(o => ({ value: o.id ?? o.organisationid, label: o.name }))]}
                   onPick={(v) => { patch('organisationid', v || null); setOpenPicker(null); }}
                   render={(opt) => <span>{opt.label}</span>}
                 />
@@ -303,14 +336,32 @@ export function DetailPanel({
                       <Icon name="chevron-d" size={11}/>
                     </>
                   }
-                  options={[{ value: '', label: 'No product' }, ...(lookups?.products || []).map(p => ({ value: p.id ?? p.productid, label: p.name }))]}
-                  onPick={(v) => { patch('productid', v || null); setOpenPicker(null); }}
+                  options={[{ value: '', label: 'No product' }, ...((lookups?.accessibleProducts) || []).map(p => ({ value: p.id ?? p.productid, label: p.name }))]}
+                  onPick={(v) => {
+                    // Changing product clears module to avoid a mismatched pair.
+                    patchMany({ productid: v || null, moduleid: null });
+                    setOpenPicker(null);
+                  }}
                   render={(opt) => <span>{opt.label}</span>}
                 />
               </SideField>
 
               <SideField label="Module">
-                <div className="sidefield-btn"><span>{mod?.name || task.modulename || '—'}</span></div>
+                <FieldPickerButton
+                  open={openPicker === 'moduleid'}
+                  onToggle={() => task.productid && setOpenPicker(openPicker === 'moduleid' ? null : 'moduleid')}
+                  disabled={!task.productid}
+                  current={
+                    <>
+                      <Icon name="tag" size={13}/>
+                      <span>{mod?.name || task.modulename || (task.productid ? 'Pick a module' : 'Pick a product first')}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[{ value: '', label: 'No module' }, ...availableModules]}
+                  onPick={(v) => { patch('moduleid', v || null); setOpenPicker(null); }}
+                  render={(opt) => <span>{opt.label}</span>}
+                />
               </SideField>
 
               <SideField label="Group">
@@ -396,11 +447,18 @@ function SideField({ label, children }) {
 }
 
 /* Picker button: closed shows current; open shows option list overlay */
-function FieldPickerButton({ open, onToggle, current, options, onPick, render }) {
+function FieldPickerButton({ open, onToggle, current, options, onPick, render, disabled }) {
   return (
     <div style={{ position: 'relative' }}>
-      <button className="sidefield-btn" onClick={onToggle}>{current}</button>
-      {open && (
+      <button
+        className="sidefield-btn"
+        onClick={onToggle}
+        disabled={disabled}
+        style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+      >
+        {current}
+      </button>
+      {open && !disabled && (
         <div className="sidefield-pop">
           {options.map((opt, i) => (
             <button key={i} className="sidefield-popitem" onClick={() => onPick(opt.value)}>

@@ -80,6 +80,31 @@ export async function findUserByUsername(username) {
   }
 }
 
+/* Per-user access lists. Both are scoped to the logged-in user via the
+ * (userid=N) filter, and both return [] on any error so the UI degrades
+ * to "no access" rather than throwing. */
+export async function listUserOrgs(userid) {
+  if (userid == null) return [];
+  const filter = `(userid=${userid})`;
+  try {
+    const r = await restful({ url: `~/v2/userorgs?filter=${encodeURIComponent(filter)}` });
+    return r?.collection || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listUserProductsModules(userid) {
+  if (userid == null) return [];
+  const filter = `(userid=${userid})`;
+  try {
+    const r = await restful({ url: `~/v2/userproductsmodules?filter=${encodeURIComponent(filter)}` });
+    return r?.collection || [];
+  } catch {
+    return [];
+  }
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
@@ -127,13 +152,15 @@ function mockRoute(opts) {
 }
 
 const MOCK = {
-  tasks:      SEED.tasks.slice(),
-  orgs:       SEED.orgs,
-  products:   SEED.products,
-  modules:    SEED.modules,
-  taskgroups: SEED.taskgroups,
-  users:      SEED.users,
-  nextId:     Math.max(...SEED.tasks.map(t => t.taskid)) + 1,
+  tasks:                SEED.tasks.slice(),
+  orgs:                 SEED.orgs,
+  products:             SEED.products,
+  modules:              SEED.modules,
+  taskgroups:           SEED.taskgroups,
+  users:                SEED.users,
+  userOrgs:             SEED.userOrgs,
+  userProductsModules:  SEED.userProductsModules,
+  nextId:               Math.max(...SEED.tasks.map(t => t.taskid)) + 1,
 };
 
 function handleMock({ method = 'GET', url, body } = {}) {
@@ -178,6 +205,18 @@ function handleMock({ method = 'GET', url, body } = {}) {
     const q = String(url).split('?')[1] || '';
     const m = decodeURIComponent(q).match(/username='([^']*)'/);
     const filtered = m ? MOCK.users.filter(u => u.username === m[1]) : MOCK.users;
+    return { collection: filtered };
+  }
+  if (method === 'GET' && path === '/v2/userorgs') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/userid=(\d+)/);
+    const filtered = m ? MOCK.userOrgs.filter(r => r.userid === parseInt(m[1], 10)) : MOCK.userOrgs;
+    return { collection: filtered };
+  }
+  if (method === 'GET' && path === '/v2/userproductsmodules') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/userid=(\d+)/);
+    const filtered = m ? MOCK.userProductsModules.filter(r => r.userid === parseInt(m[1], 10)) : MOCK.userProductsModules;
     return { collection: filtered };
   }
 

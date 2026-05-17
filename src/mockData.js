@@ -203,4 +203,24 @@ const tasks = rawTasks.map((t, i) => {
   };
 });
 
-export const SEED = { users, orgs, products, modules, taskgroups, tasks };
+/* Per-user access tables for the mock `me` user (userid=8).
+ * Gates the Client picker (userOrgs) and the Product / Module pickers
+ * (userProductsModules) the same way the real backend does. */
+const userOrgs = [
+  { userid: 8, organisationid: 1, isprimary: true,  organisationName: 'Northwind Health' },
+  { userid: 8, organisationid: 3, isprimary: false, organisationName: 'Larkfield Bank'   },
+  { userid: 8, organisationid: 6, isprimary: false, organisationName: 'Internal'         },
+];
+
+const userProductsModules = [
+  // Patient Portal (product 1) — full access to all three modules
+  { userid: 8, productid: 1, moduleid: 1, canread: true, canwrite: true,  candelete: false, productname: 'Patient Portal',    modulename: 'Auth & SSO' },
+  { userid: 8, productid: 1, moduleid: 2, canread: true, canwrite: true,  candelete: false, productname: 'Patient Portal',    modulename: 'Records'    },
+  { userid: 8, productid: 1, moduleid: 3, canread: true, canwrite: true,  candelete: false, productname: 'Patient Portal',    modulename: 'Billing'    },
+  // Clinician Tablet (product 2) — only Charting is writable
+  { userid: 8, productid: 2, moduleid: 4, canread: true, canwrite: true,  candelete: false, productname: 'Clinician Tablet',  modulename: 'Charting'   },
+  // Retail Banking App (product 4) — write access to Transfers
+  { userid: 8, productid: 4, moduleid: 8, canread: true, canwrite: true,  candelete: false, productname: 'Retail Banking App', modulename: 'Transfers'  },
+];
+
+export const SEED = { users, orgs, products, modules, taskgroups, tasks, userOrgs, userProductsModules };

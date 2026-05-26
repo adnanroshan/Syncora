@@ -305,12 +305,11 @@ export function DetailPanel({
                 <DescriptionBlock task={task} onSave={(v) => patch('description', v)} />
 
                 <Subtasks
-                  value={task.subtasks}
-                  onChange={(next) => patch('subtasks', next)}
-                  disabled={isDraft}
-                  taskId={isDraft ? null : task.taskid}
+                  parent={task}
                   api={api}
                   usersById={usersById}
+                  onOpen={onNavigate}
+                  disabled={isDraft}
                 />
 
                 {!isDraft && <Audit task={task} assignee={assignee}/>}

@@ -1,70 +1,149 @@
-/* Subtasks block — stored as a JSON array on the task itself.
+/* Subtasks block — each subtask is a real task linked by parenttaskid.
  *
- * Each subtask: { id: string, title: string, done: boolean, assigneeId: number | null }
+ * Toggle done   → PATCH /v2/tasks/<child>   { status: 'done'|'todo' }
+ * Rename        → PATCH /v2/tasks/<child>   { title }
+ * Delete        → DELETE /v2/tasks/<child>
+ * Add           → POST /v2/tasks            { title, parenttaskid, …inherited scope }
+ * Assignee pick → POST /v2/taskassignees    (and removeAssignee for the previous one)
  *
- * Per-subtask assignees are constrained to the parent task's assignees:
- * we fetch them here via api.listAssignees(taskId) so we don't have to
- * lift state out of AssigneesField.
+ * The per-row avatar picker is scoped to the parent task's assignees.
+ * Each child task's own assignees are fetched in parallel on load so we
+ * can highlight the currently-primary user without a second click.
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Icon } from './Icons.jsx';
 import { Avatar } from './Shared.jsx';
 
-export function Subtasks({ value, onChange, disabled, taskId, api, usersById = {} }) {
-  const list  = Array.isArray(value) ? value : [];
-  const done  = list.filter(s => s.done).length;
-  const total = list.length;
+export function Subtasks({ parent, api, usersById = {}, onOpen, disabled }) {
+  const parentId = parent?.taskid;
+
+  const [items, setItems] = useState([]);
+  const [assigneesByChild, setAssigneesByChild] = useState({});
+  const [parentAssignees, setParentAssignees] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const done  = items.filter(s => s.status === 'done').length;
+  const total = items.length;
   const pct   = total ? (done / total) * 100 : 0;
 
-  /* Parent-task assignees — the *only* candidates for subtask assignment. */
-  const [parentAssignees, setParentAssignees] = useState([]);
+  /* Load children + each child's assignees in parallel. */
+  const refresh = useCallback(async () => {
+    if (disabled || parentId == null) { setItems([]); setAssigneesByChild({}); return; }
+    setLoading(true);
+    try {
+      const rows = await api.listSubtasks(parentId);
+      setItems(rows);
+      const lists = await Promise.all(rows.map(r => api.listAssignees(r.taskid).catch(() => [])));
+      const map = {};
+      rows.forEach((r, i) => { map[r.taskid] = lists[i] || []; });
+      setAssigneesByChild(map);
+    } finally {
+      setLoading(false);
+    }
+  }, [api, parentId, disabled]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  /* Parent's assignees — the candidate pool for the per-row picker. */
   useEffect(() => {
-    if (disabled || taskId == null || !api) { setParentAssignees([]); return; }
+    if (disabled || parentId == null) { setParentAssignees([]); return; }
     let cancelled = false;
-    api.listAssignees(taskId)
+    api.listAssignees(parentId)
       .then(rows => { if (!cancelled) setParentAssignees(Array.isArray(rows) ? rows : []); })
       .catch(() => { if (!cancelled) setParentAssignees([]); });
     return () => { cancelled = true; };
-  }, [api, taskId, disabled]);
+  }, [api, parentId, disabled]);
 
-  const candidates = useMemo(() => {
-    return parentAssignees
-      .map(a => usersById[a.assigneduserid] || {
-        userid:   a.assigneduserid,
-        username: a.assignedusername,
-        name:     a.assignedusername,
+  const candidates = useMemo(
+    () => parentAssignees.map(a => usersById[a.assigneduserid] || {
+      userid:   a.assigneduserid,
+      username: a.assignedusername,
+      name:     a.assignedusername,
+    }),
+    [parentAssignees, usersById],
+  );
+
+  /* --- mutations (optimistic where it's safe) --- */
+  const toggleDone = async (child) => {
+    const next = child.status === 'done' ? 'todo' : 'done';
+    setItems(prev => prev.map(c => c.taskid === child.taskid ? { ...c, status: next } : c));
+    try { await api.patchTask(child, { status: next }); }
+    catch (err) {
+      setItems(prev => prev.map(c => c.taskid === child.taskid ? { ...c, status: child.status } : c));
+      alert('Could not update subtask: ' + prettyErr(err));
+    }
+  };
+
+  const renameChild = async (child, title) => {
+    if (!title || title === child.title) return;
+    setItems(prev => prev.map(c => c.taskid === child.taskid ? { ...c, title } : c));
+    try { await api.patchTask(child, { title }); }
+    catch (err) {
+      setItems(prev => prev.map(c => c.taskid === child.taskid ? { ...c, title: child.title } : c));
+      alert('Could not rename subtask: ' + prettyErr(err));
+    }
+  };
+
+  const deleteChild = async (child) => {
+    const before = items;
+    setItems(prev => prev.filter(c => c.taskid !== child.taskid));
+    try { await api.deleteTask(child); }
+    catch (err) {
+      setItems(before);
+      alert('Could not delete subtask: ' + prettyErr(err));
+    }
+  };
+
+  const addChild = async (title) => {
+    const t = (title || '').trim();
+    if (!t) return false;
+    try {
+      const created = await api.createTask({
+        title:          t,
+        parenttaskid:   parentId,
+        organisationid: parent.organisationid,
+        productid:      parent.productid,
+        moduleid:       parent.moduleid,
+        taskgroupid:    parent.taskgroupid,
+        status:         'todo',
+        priority:       parent.priority || 'medium',
       });
-  }, [parentAssignees, usersById]);
+      setItems(prev => [...prev, created]);
+      setAssigneesByChild(prev => ({ ...prev, [created.taskid]: [] }));
+      return true;
+    } catch (err) {
+      alert('Could not add subtask: ' + prettyErr(err));
+      return false;
+    }
+  };
 
+  const reassign = async (child, userid) => {
+    const current = assigneesByChild[child.taskid] || [];
+    for (const a of current) {
+      try { await api.removeAssignee(child.taskid, a.assigneduserid); } catch { /* ignore */ }
+    }
+    if (userid != null) {
+      try { await api.addAssignee({ taskid: child.taskid, assigneduserid: userid, isprimary: true }); }
+      catch (err) { alert('Could not assign: ' + prettyErr(err)); }
+    }
+    try {
+      const fresh = await api.listAssignees(child.taskid);
+      setAssigneesByChild(prev => ({ ...prev, [child.taskid]: fresh }));
+    } catch { /* ignore */ }
+  };
+
+  /* --- inline add + rename UI state --- */
   const [adding,    setAdding]    = useState(false);
   const [newTitle,  setNewTitle]  = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState('');
   const newInputRef = useRef(null);
 
-  const update = (next) => onChange(next);
-  const toggle = (id)        => update(list.map(s => s.id === id ? { ...s, done: !s.done } : s));
-  const remove = (id)        => update(list.filter(s => s.id !== id));
-  const rename = (id, t)     => update(list.map(s => s.id === id ? { ...s, title: t } : s));
-  const assign = (id, uid)   => update(list.map(s => s.id === id ? { ...s, assigneeId: uid } : s));
-
-  const newId = () =>
-    (window.crypto && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-  const add = (title) => {
-    const t = (title || '').trim();
-    if (!t) return false;
-    update([...list, { id: newId(), title: t, done: false, assigneeId: null }]);
-    return true;
-  };
-
-  const startEdit  = (s) => { setEditingId(s.id); setEditDraft(s.title); };
+  const startEdit  = (s) => { setEditingId(s.taskid); setEditDraft(s.title || ''); };
   const commitEdit = (s) => {
     const t = editDraft.trim();
-    if (t && t !== s.title) rename(s.id, t);
+    if (t && t !== s.title) renameChild(s, t);
     setEditingId(null);
   };
 
@@ -92,56 +171,62 @@ export function Subtasks({ value, onChange, disabled, taskId, api, usersById = {
       </div>
 
       <ul className="subtasks">
-        {list.map(s => (
-          <li key={s.id} className={s.done ? 'is-done' : ''}>
-            <button
-              className="subtask-check"
-              onClick={() => toggle(s.id)}
-              aria-label={s.done ? 'Mark incomplete' : 'Mark complete'}
-              title={s.done ? 'Mark incomplete' : 'Mark complete'}
-            >
-              {s.done && <Icon name="check" size={10}/>}
-            </button>
-
-            {editingId === s.id ? (
-              <input
-                className="subtask-input"
-                autoFocus
-                value={editDraft}
-                onChange={(e) => setEditDraft(e.target.value)}
-                onBlur={() => commitEdit(s)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter')  { e.preventDefault(); e.target.blur(); }
-                  if (e.key === 'Escape') { setEditDraft(s.title); setEditingId(null); }
-                }}
-              />
-            ) : (
-              <span
-                className="subtask-title"
-                onClick={() => startEdit(s)}
-                title="Click to edit"
+        {items.map(s => {
+          const isDone = s.status === 'done';
+          const rows = assigneesByChild[s.taskid] || [];
+          const primary = rows.find(r => r.isprimary) || rows[0] || null;
+          return (
+            <li key={s.taskid} className={isDone ? 'is-done' : ''}>
+              <button
+                className="subtask-check"
+                onClick={() => toggleDone(s)}
+                aria-label={isDone ? 'Mark incomplete' : 'Mark complete'}
+                title={isDone ? 'Mark incomplete' : 'Mark complete'}
               >
-                {s.title}
-              </span>
-            )}
+                {isDone && <Icon name="check" size={10}/>}
+              </button>
 
-            <SubtaskAssigneePicker
-              value={s.assigneeId}
-              candidates={candidates}
-              usersById={usersById}
-              onPick={(uid) => assign(s.id, uid)}
-            />
+              {editingId === s.taskid ? (
+                <input
+                  className="subtask-input"
+                  autoFocus
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onBlur={() => commitEdit(s)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter')  { e.preventDefault(); e.target.blur(); }
+                    if (e.key === 'Escape') { setEditDraft(s.title || ''); setEditingId(null); }
+                  }}
+                />
+              ) : (
+                <span
+                  className="subtask-title"
+                  onClick={() => startEdit(s)}
+                  onDoubleClick={() => onOpen?.(s.taskid)}
+                  title="Click to edit · double-click to open"
+                >
+                  {s.title || '(untitled)'}
+                </span>
+              )}
 
-            <button
-              className="subtask-del"
-              onClick={() => remove(s.id)}
-              aria-label="Delete subtask"
-              title="Delete subtask"
-            >
-              <Icon name="close" size={12}/>
-            </button>
-          </li>
-        ))}
+              <SubtaskAssigneePicker
+                value={primary?.assigneduserid ?? null}
+                candidates={candidates}
+                usersById={usersById}
+                onPick={(uid) => reassign(s, uid)}
+              />
+
+              <button
+                className="subtask-del"
+                onClick={() => deleteChild(s)}
+                aria-label="Delete subtask"
+                title="Delete subtask"
+              >
+                <Icon name="close" size={12}/>
+              </button>
+            </li>
+          );
+        })}
       </ul>
 
       {adding ? (
@@ -155,16 +240,16 @@ export function Subtasks({ value, onChange, disabled, taskId, api, usersById = {
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onBlur={() => {
-              setTimeout(() => {
-                if (newTitle.trim()) add(newTitle);
+              setTimeout(async () => {
+                if (newTitle.trim()) await addChild(newTitle);
                 setNewTitle('');
                 setAdding(false);
               }, 0);
             }}
-            onKeyDown={(e) => {
+            onKeyDown={async (e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                if (add(newTitle)) {
+                if (await addChild(newTitle)) {
                   setNewTitle('');
                   requestAnimationFrame(() => newInputRef.current?.focus());
                 }
@@ -178,7 +263,7 @@ export function Subtasks({ value, onChange, disabled, taskId, api, usersById = {
           <span className="subtask-hint">↵ add · esc close</span>
         </div>
       ) : (
-        <button className="subtask-addbtn" onClick={() => setAdding(true)}>
+        <button className="subtask-addbtn" onClick={() => setAdding(true)} disabled={disabled}>
           <Icon name="plus" size={12}/>
           <span>Add subtask</span>
         </button>
@@ -187,12 +272,7 @@ export function Subtasks({ value, onChange, disabled, taskId, api, usersById = {
   );
 }
 
-/* ----------------------- Assignee picker ----------------------- *
- * Scoped strictly to the parent task's assignees. Always includes
- * the currently-set assignee even if they've since been removed
- * from the parent (marked "orphan") so the user can reassign or
- * clear without confusion.
- * --------------------------------------------------------------- */
+/* ----------------------- Assignee picker ----------------------- */
 function SubtaskAssigneePicker({ value, candidates, usersById, onPick }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -275,4 +355,10 @@ function SubtaskAssigneePicker({ value, candidates, usersById, onPick }) {
       )}
     </div>
   );
+}
+
+function prettyErr(err) {
+  if (!err) return 'Unknown error';
+  if (err.errors?.[0]) return err.errors[0].message || err.errors[0].reason || 'Error';
+  return err.message || String(err);
 }

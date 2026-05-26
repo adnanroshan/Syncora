@@ -125,6 +125,12 @@ export async function setPrimaryAssignee(taskid, assigneduserid) {
   });
 }
 
+export async function listSubtasks(parenttaskid) {
+  if (parenttaskid == null) return [];
+  const r = await restful({ url: `~/v2/tasks?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})` });
+  return r?.collection || [];
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
@@ -188,7 +194,16 @@ function handleMock({ method = 'GET', url, body } = {}) {
   const path = stripTilde(url).split('?')[0];
 
   if (method === 'GET' && path === '/v2/tasks') {
-    return { collection: MOCK.tasks, count: MOCK.tasks.length };
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/parenttaskid=(\d+|null)/);
+    let rows = MOCK.tasks;
+    if (m) {
+      const v = m[1];
+      rows = v === 'null'
+        ? rows.filter(t => t.parenttaskid == null)
+        : rows.filter(t => t.parenttaskid === parseInt(v, 10));
+    }
+    return { collection: rows, count: rows.length };
   }
   if (method === 'GET' && path.startsWith('/v2/tasks/')) {
     const id = parseInt(path.split('/').pop(), 10);

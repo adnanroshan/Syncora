@@ -1,23 +1,47 @@
-/* Sliding detail panel — fetches full task by ID, supports inline title editing,
-   status/priority/assignee/due/group/client/product/module changes via PATCH. */
+/* Sliding detail panel.
+ *
+ * Two modes:
+ *  - Saved mode (taskId set, no draftTask): fetches full task by ID and
+ *    PATCHes every field change.
+ *  - Draft mode (draftTask set): edits are kept in memory; a single POST
+ *    fires when the user clicks Create.
+ */
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icon, StatusGlyph } from './Icons.jsx';
 import {
   Avatar, OrgMark, PriorityMark, DueChip,
-  fmtFullDate, labelize, normaliseStatus, statusLabel
+  fmtFullDate, fmtFullDateTime, labelize, normaliseStatus, statusLabel
 } from './Shared.jsx';
+import { DueDatePicker } from './DueDatePicker.jsx';
+import { AssigneesField } from './AssigneesField.jsx';
 
-export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, api, onAfterPatch, onAfterDelete }) {
+export function DetailPanel({
+  taskId, draftTask, creating,
+  onClose, onNavigate, onDiscardDraft, onCommitDraft,
+  allTasks, lookups, usersById, api, onAfterPatch, onAfterDelete,
+}) {
+  const isDraft = !!draftTask;
   const [task, setTask]     = useState(null);
   const [loading, setLoad]  = useState(false);
   const [error, setError]   = useState(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const [openPicker, setOpenPicker] = useState(null);  // 'status' | 'priority' | 'assignee' | 'due' | etc.
+  const [openPicker, setOpenPicker] = useState(null);
 
-  /* fetch full task when ID changes */
+  /* In draft mode, mirror the parent's draftTask into local `task`. */
   useEffect(() => {
+    if (!isDraft) return;
+    setTask(draftTask);
+    setTitleDraft(draftTask?.title || '');
+    setEditingTitle(false);
+    setError(null);
+    setLoad(false);
+  }, [isDraft, draftTask]);
+
+  /* In saved mode, fetch the full task whenever the ID changes. */
+  useEffect(() => {
+    if (isDraft) return;
     if (!taskId) { setTask(null); return; }
     let cancelled = false;
     setLoad(true); setError(null);
@@ -26,29 +50,40 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
       .catch(err => { if (!cancelled) setError(prettyErr(err)); })
       .finally(() => { if (!cancelled) setLoad(false); });
     return () => { cancelled = true; };
-  }, [taskId, api]);
+  }, [taskId, api, isDraft]);
 
   const siblings = allTasks || [];
-  const idx  = task ? siblings.findIndex(t => t.taskid === task.taskid) : -1;
+  const idx  = task && !isDraft ? siblings.findIndex(t => t.taskid === task.taskid) : -1;
   const prev = idx > 0 ? siblings[idx - 1] : null;
   const next = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
 
-  const orgsById      = useMemo(() => indexBy(lookups?.orgs,       o => o.id ?? o.organisationid), [lookups]);
-  const productsById  = useMemo(() => indexBy(lookups?.products,   p => p.id ?? p.productid),      [lookups]);
-  const modulesById   = useMemo(() => indexBy(lookups?.modules,    m => m.id ?? m.moduleid),       [lookups]);
+  const orgsById       = useMemo(() => indexBy(lookups?.orgs,       o => o.id ?? o.organisationid), [lookups]);
+  const productsById   = useMemo(() => indexBy(lookups?.products,   p => p.id ?? p.productid),      [lookups]);
+  const modulesById    = useMemo(() => indexBy(lookups?.modules,    m => m.id ?? m.moduleid),       [lookups]);
   const taskgroupsById = useMemo(() => indexBy(lookups?.taskgroups, g => g.id ?? g.taskgroupid),    [lookups]);
 
-  /* optimistic patch helper */
-  const patch = async (key, value) => {
+  /* Field-change helper. In draft mode it just updates local state. In
+   * saved mode it does an optimistic PATCH against the backend. */
+  const patch = async (key, value) => patchMany({ [key]: value });
+
+  /* Multi-key variant — used when one user action needs to update two
+   * fields atomically (e.g. changing the product also clears the
+   * module so we never end up with a mismatched pair on the wire). */
+  const patchMany = async (changes) => {
     if (!task) return;
-    const optimistic = { ...task, [key]: value };
+    if (isDraft) {
+      setTask(t => ({ ...t, ...changes }));
+      return;
+    }
+    const before = task;
+    const optimistic = { ...task, ...changes };
     setTask(optimistic);
     try {
-      const saved = await api.patchTask(task, { [key]: value });
-      setTask(prev => ({ ...prev, ...saved }));
-      onAfterPatch?.({ ...task, [key]: value, ...saved });
+      const saved = await api.patchTask(before, changes);
+      setTask(p => ({ ...p, ...saved }));
+      onAfterPatch?.({ ...before, ...changes, ...saved });
     } catch (err) {
-      setTask(task);
+      setTask(before);
       alert('Could not save: ' + prettyErr(err));
     }
   };
@@ -75,7 +110,7 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
   };
 
   const onDelete = async () => {
-    if (!task) return;
+    if (!task || isDraft) return;
     if (!confirm('Delete this task? This cannot be undone.')) return;
     try {
       await api.deleteTask(task);
@@ -86,32 +121,89 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
     }
   };
 
-  if (!taskId) return null;
+  const onCreateClick = async () => {
+    if (!isDraft || !task) return;
+    if (!task.title || !task.title.trim()) {
+      alert('Please enter a title.');
+      return;
+    }
+    await onCommitDraft({ ...task, title: task.title.trim() });
+  };
+
+  const handleClose = () => {
+    if (isDraft) onDiscardDraft();
+    else         onClose();
+  };
+
+  /* Modules the user can write against, scoped to the currently-selected
+   * product. Deduped by moduleid because the userproductsmodules table
+   * could in theory have repeats. */
+  const availableModules = useMemo(() => {
+    if (!task?.productid) return [];
+    const map = new Map();
+    (lookups?.userProductsModules || []).forEach(r => {
+      if (r.productid !== task.productid) return;
+      if (!r.canwrite) return;
+      if (r.moduleid == null) return;
+      if (map.has(r.moduleid)) return;
+      map.set(r.moduleid, { value: r.moduleid, label: r.modulename });
+    });
+    return Array.from(map.values()).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  }, [lookups?.userProductsModules, task?.productid]);
+
+  /* "Can the user create any task at all?" — used to gate the Create
+   * button in draft mode with a tooltip explaining why it's disabled. */
+  const canCreate = useMemo(
+    () => (lookups?.userProductsModules || []).some(r => r.canwrite),
+    [lookups?.userProductsModules],
+  );
+
+  if (!taskId && !isDraft) return null;
 
   const org   = task ? orgsById[task.organisationid] : null;
   const prod  = task ? productsById[task.productid]   : null;
   const mod   = task ? modulesById[task.moduleid]     : null;
   const group = task ? taskgroupsById[task.taskgroupid] : null;
   const status = task ? normaliseStatus(task.status) : null;
+  const assignee = task ? (usersById?.[task.createdbyuserid] || null) : null;
 
   return (
     <>
-      <div className="detail-scrim" onClick={onClose}/>
-      <aside className="detail" role="dialog" aria-label={task?.title || 'Task'}>
+      <div className="detail-scrim" onClick={handleClose}/>
+      <aside className="detail" role="dialog" aria-label={task?.title || (isDraft ? 'New task' : 'Task')}>
         <header className="detail-head">
           <div className="detail-head-left">
-            <button className="iconbtn" onClick={onClose} aria-label="Close"><Icon name="close" size={16}/></button>
-            <span className="detail-id">#{taskId}</span>
+            <button className="iconbtn" onClick={handleClose} aria-label="Close"><Icon name="close" size={16}/></button>
+            <span className="detail-id">{isDraft ? 'New' : `#${taskId}`}</span>
             <span className="detail-crumb">
               {task?.organisationname || '—'} <Icon name="chevron-r" size={11}/> {task?.productname || '—'}
             </span>
           </div>
           <div className="detail-head-right">
-            <button className="iconbtn" onClick={() => prev && onNavigate(prev.taskid)} disabled={!prev} aria-label="Previous"><Icon name="chevron-l" size={15}/></button>
-            <button className="iconbtn" onClick={() => next && onNavigate(next.taskid)} disabled={!next} aria-label="Next"><Icon name="chevron-r" size={15}/></button>
-            <span className="detail-divider"/>
-            <button className="iconbtn" onClick={onDelete} aria-label="Delete"><Icon name="close" size={15}/></button>
-            <button className="iconbtn" aria-label="More"><Icon name="more" size={15}/></button>
+            {isDraft ? (
+              <>
+                <button
+                  className="btn-primary"
+                  onClick={onCreateClick}
+                  disabled={creating || !task?.title?.trim() || !canCreate}
+                  title={!canCreate ? "You don't have permission to create tasks" : undefined}
+                >
+                  <Icon name="plus" size={13}/>
+                  <span>{creating ? 'Creating…' : 'Create'}</span>
+                </button>
+                <button className="iconbtn" onClick={handleClose} aria-label="Discard">
+                  <Icon name="close" size={15}/>
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="iconbtn" onClick={() => prev && onNavigate(prev.taskid)} disabled={!prev} aria-label="Previous"><Icon name="chevron-l" size={15}/></button>
+                <button className="iconbtn" onClick={() => next && onNavigate(next.taskid)} disabled={!next} aria-label="Next"><Icon name="chevron-r" size={15}/></button>
+                <span className="detail-divider"/>
+                <button className="iconbtn" onClick={onDelete} aria-label="Delete"><Icon name="close" size={15}/></button>
+                <button className="iconbtn" aria-label="More"><Icon name="more" size={15}/></button>
+              </>
+            )}
           </div>
         </header>
 
@@ -128,27 +220,34 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
               </div>
             ) : task ? (
               <>
-                {editingTitle ? (
+                {editingTitle || (isDraft && !task.title) ? (
                   <textarea
                     className="detail-title-input"
                     autoFocus
+                    placeholder={isDraft ? 'Task title' : ''}
                     value={titleDraft}
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                    onBlur={onSaveTitle}
+                    onChange={(e) => {
+                      setTitleDraft(e.target.value);
+                      if (isDraft) setTask(t => ({ ...t, title: e.target.value }));
+                    }}
+                    onBlur={() => { if (!isDraft) onSaveTitle(); else setEditingTitle(false); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.target.blur(); }
-                      if (e.key === 'Escape') { setTitleDraft(task.title); setEditingTitle(false); }
+                      if (e.key === 'Escape') {
+                        if (!isDraft) { setTitleDraft(task.title); setEditingTitle(false); }
+                        else          { e.target.blur(); }
+                      }
                     }}
                   />
                 ) : (
                   <h1 className="detail-title" onClick={() => setEditingTitle(true)} title="Click to edit">
-                    {task.title || '(untitled)'}
+                    {task.title || (isDraft ? <span className="empty-text">Click to add a title</span> : '(untitled)')}
                   </h1>
                 )}
 
                 <DescriptionBlock task={task} onSave={(v) => patch('description', v)} />
 
-                <Audit task={task}/>
+                {!isDraft && <Audit task={task} assignee={assignee}/>}
               </>
             ) : null}
           </div>
@@ -205,8 +304,8 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
                   onToggle={() => setOpenPicker(openPicker === 'assignee' ? null : 'assignee')}
                   current={
                     <>
-                      <Avatar user={task.assignee} name={task.usersusername} size={18}/>
-                      <span>{task.assignee?.name || task.usersusername || 'Unassigned'}</span>
+                      <Avatar user={assignee} size={18}/>
+                      <span>{assignee?.name || assignee?.username || 'Unassigned'}</span>
                       <Icon name="chevron-d" size={11}/>
                     </>
                   }
@@ -221,17 +320,10 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
               </SideField>
 
               <SideField label="Due date">
-                <div className="sidefield-btn">
-                  <Icon name="calendar" size={13}/>
-                  <input
-                    type="date"
-                    className="sidefield-date"
-                    value={task.duedate ? String(task.duedate).substring(0, 10) : ''}
-                    onChange={(e) => patch('duedate', e.target.value || null)}
-                  />
-                  <span style={{ flex: 1 }}/>
-                  <DueChip iso={task.duedate}/>
-                </div>
+                <DueDatePicker
+                  value={task.duedate}
+                  onChange={(iso) => patch('duedate', iso)}
+                />
               </SideField>
 
               <SideField label="Client">
@@ -245,7 +337,7 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
                       <Icon name="chevron-d" size={11}/>
                     </>
                   }
-                  options={[{ value: '', label: 'No client' }, ...(lookups?.orgs || []).map(o => ({ value: o.id ?? o.organisationid, label: o.name }))]}
+                  options={[{ value: '', label: 'No client' }, ...((lookups?.accessibleOrgs) || []).map(o => ({ value: o.id ?? o.organisationid, label: o.name }))]}
                   onPick={(v) => { patch('organisationid', v || null); setOpenPicker(null); }}
                   render={(opt) => <span>{opt.label}</span>}
                 />
@@ -262,14 +354,32 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
                       <Icon name="chevron-d" size={11}/>
                     </>
                   }
-                  options={[{ value: '', label: 'No product' }, ...(lookups?.products || []).map(p => ({ value: p.id ?? p.productid, label: p.name }))]}
-                  onPick={(v) => { patch('productid', v || null); setOpenPicker(null); }}
+                  options={[{ value: '', label: 'No product' }, ...((lookups?.accessibleProducts) || []).map(p => ({ value: p.id ?? p.productid, label: p.name }))]}
+                  onPick={(v) => {
+                    // Changing product clears module to avoid a mismatched pair.
+                    patchMany({ productid: v || null, moduleid: null });
+                    setOpenPicker(null);
+                  }}
                   render={(opt) => <span>{opt.label}</span>}
                 />
               </SideField>
 
               <SideField label="Module">
-                <div className="sidefield-btn"><span>{mod?.name || task.modulename || '—'}</span></div>
+                <FieldPickerButton
+                  open={openPicker === 'moduleid'}
+                  onToggle={() => task.productid && setOpenPicker(openPicker === 'moduleid' ? null : 'moduleid')}
+                  disabled={!task.productid}
+                  current={
+                    <>
+                      <Icon name="tag" size={13}/>
+                      <span>{mod?.name || task.modulename || (task.productid ? 'Pick a module' : 'Pick a product first')}</span>
+                      <Icon name="chevron-d" size={11}/>
+                    </>
+                  }
+                  options={[{ value: '', label: 'No module' }, ...availableModules]}
+                  onPick={(v) => { patch('moduleid', v || null); setOpenPicker(null); }}
+                  render={(opt) => <span>{opt.label}</span>}
+                />
               </SideField>
 
               <SideField label="Group">
@@ -289,10 +399,12 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
                 />
               </SideField>
 
-              <div className="side-meta">
-                <div>Created {fmtFullDate(task.creationdate)}</div>
-                <div>Updated {fmtFullDate(task.lastmodifieddate)}</div>
-              </div>
+              {!isDraft && (
+                <div className="side-meta">
+                  <div>Created {fmtFullDate(task.creationdate)}</div>
+                  <div>Updated {fmtFullDate(task.lastmodifieddate)}</div>
+                </div>
+              )}
             </aside>
           )}
         </div>
@@ -331,13 +443,26 @@ function DescriptionBlock({ task, onSave }) {
 }
 
 /* ---------- audit footer ---------- */
-function Audit({ task }) {
-  // Hide entirely when there's no real assigner (new tasks, system-created rows)
-  if (!task.usersusername) return null;
+function Audit({ task, assignee }) {
+  if (!assignee && !task.lastmodifieddate) return null;
+  const who = assignee?.name || assignee?.username;
   return (
     <div className="audit">
-      <span>Assigned by {task.usersusername}{task.creationdate ? ` · ${fmtFullDate(task.creationdate)}` : ''}</span>
-      {task.lastmodifieddate && <span>Updated {fmtFullDate(task.lastmodifieddate)}</span>}
+      {who && (
+        <div className="audit-row">
+          <span className="audit-label">Assigned by</span>
+          <span className="audit-value">
+            {who}
+            {task.creationdate ? ` · ${fmtFullDate(task.creationdate)}` : ''}
+          </span>
+        </div>
+      )}
+      {task.lastmodifieddate && (
+        <div className="audit-row">
+          <span className="audit-label">Last updated at</span>
+          <span className="audit-value">{fmtFullDateTime(task.lastmodifieddate)}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -353,11 +478,18 @@ function SideField({ label, children }) {
 }
 
 /* Picker button: closed shows current; open shows option list overlay */
-function FieldPickerButton({ open, onToggle, current, options, onPick, render }) {
+function FieldPickerButton({ open, onToggle, current, options, onPick, render, disabled }) {
   return (
     <div style={{ position: 'relative' }}>
-      <button className="sidefield-btn" onClick={onToggle}>{current}</button>
-      {open && (
+      <button
+        className="sidefield-btn"
+        onClick={onToggle}
+        disabled={disabled}
+        style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+      >
+        {current}
+      </button>
+      {open && !disabled && (
         <div className="sidefield-pop">
           {options.map((opt, i) => (
             <button key={i} className="sidefield-popitem" onClick={() => onPick(opt.value)}>

@@ -66,9 +66,10 @@ export function ViewTabs({ view, onChange, counts, sortBy, onSort, groupBy, onGr
           open={openChip === 'assignee'} onToggle={() => setOpenChip(openChip === 'assignee' ? null : 'assignee')}
           options={[
             { value: null, label: 'Any' },
-            ...(assigneeOptions || []).map(a => ({ value: a, label: a })),
+            ...(assigneeOptions || []),
           ]}
           onPick={(v) => pick({ assignee: v })}
+          formatValue={(v) => (assigneeOptions || []).find(o => o.value === v)?.label || String(v)}
         />
         <span className="vt-divider"/>
         {view === 'grouped' && (
@@ -86,13 +87,14 @@ export function ViewTabs({ view, onChange, counts, sortBy, onSort, groupBy, onGr
   );
 }
 
-function FilterChip({ label, value, open, onToggle, onPick, options }) {
+function FilterChip({ label, value, open, onToggle, onPick, options, formatValue }) {
+  const display = value == null ? 'any' : (formatValue ? formatValue(value) : labelize(value));
   return (
     <span className="fchip-wrap">
-      <button className={`fchip ${value ? 'is-active' : ''} ${open ? 'is-open' : ''}`} onClick={onToggle}>
+      <button className={`fchip ${value != null ? 'is-active' : ''} ${open ? 'is-open' : ''}`} onClick={onToggle}>
         <span className="fchip-label">{label}</span>
-        <span className="fchip-value">{value ? labelize(value) : 'any'}</span>
-        {value
+        <span className="fchip-value">{display}</span>
+        {value != null
           ? <span className="fchip-clear" onClick={(e) => { e.stopPropagation(); onPick(null); }} aria-label="Clear filter"><Icon name="close" size={11}/></span>
           : <Icon name="chevron-d" size={10}/>}
       </button>

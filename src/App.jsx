@@ -38,6 +38,17 @@ export default function App({ user, hypermedia, isMock }) {
   const [lookups, setLookups] = useState({ orgs: [], products: [], modules: [], taskgroups: [], users: [] });
   const [loading, setLoad]    = useState(true);
   const [error, setError]     = useState(null);
+  const [creating, setCreating] = useState(false);
+  // Logged-in user's `userid` from the backend (used for createdbyuserid on
+  // task POST/PATCH). Resolved lazily via /v2/users?filter=(username='…').
+  const [meUserId, setMeUserId] = useState(null);
+  // In-memory draft for "New task". When non-null, the DetailPanel renders
+  // in unsaved mode — no GET/PATCH calls. POST only fires on Create click.
+  const [draftTask, setDraftTask] = useState(null);
+  // Per-user access lists. Empty until me.userid resolves. Drives the
+  // Sidebar's Clients section and the Client/Product/Module pickers.
+  const [userOrgs, setUserOrgs] = useState([]);
+  const [userProductsModules, setUserProductsModules] = useState([]);
 
   const reload = useCallback(async () => {
     setLoad(true); setError(null);
@@ -58,29 +69,114 @@ export default function App({ user, hypermedia, isMock }) {
   const orgsById     = useMemo(() => indexBy(lookups.orgs,     o => o.id ?? o.organisationid), [lookups.orgs]);
   const productsById = useMemo(() => indexBy(lookups.products, p => p.id ?? p.productid),      [lookups.products]);
 
-  /* ------- current user — derived from id_token, mapped to task.usersusername ------- */
+  /* ------- current user — derived from id_token, joined to the backend
+   * users table so we know the numeric `userid` to write as createdbyuserid. */
   const me = useMemo(() => {
     if (isMock) {
-      // mock-mode fixture
-      return { username: 'me', name: 'You', hue: 165, isMe: true };
+      return { username: 'me', userid: 8, name: 'You', hue: 165, isMe: true };
     }
-    // The id_token gives us name/email/sub. We try to map to your tasks'
-    // `usersusername` field via the most likely candidates.
-    const username = user?.raw?.preferred_username || user?.email || user?.sub || null;
-    return user ? {
+    if (!user) return null;
+    const candidates = [
+      user?.raw?.preferred_username,
+      user?.email,
+      user?.sub,
+      user?.name,
+    ].filter(Boolean).map(s => String(s).toLowerCase());
+    const matched = (lookups.users || []).find(u => {
+      const fields = [u.username, u.email, u.name].filter(Boolean).map(s => String(s).toLowerCase());
+      return fields.some(f => candidates.includes(f));
+    });
+    const username = matched?.username
+      || user?.raw?.preferred_username
+      || user?.email
+      || user?.sub
+      || null;
+    return {
       username,
-      name:     user.name,
+      userid:   matched?.userid ?? meUserId ?? null,
+      name:     matched?.name || user.name,
       email:    user.email,
       picture:  user.picture,
       hue:      hashHue(username),
       isMe:     true,
-    } : null;
-  }, [user, isMock]);
+    };
+  }, [user, isMock, lookups.users, meUserId]);
+
+  /* Resolve `me.userid` via /v2/users?filter=(username='…') when it isn't
+   * already known from the lookups payload. Skips in mock and when we've
+   * already got an id. */
+  useEffect(() => {
+    if (isMock) return;
+    if (!me?.username || me.userid != null) return;
+    let cancelled = false;
+    api.findUserByUsername(me.username).then(row => {
+      if (!cancelled && row?.userid != null) setMeUserId(row.userid);
+    });
+    return () => { cancelled = true; };
+  }, [isMock, me?.username, me?.userid]);
+
+  /* Per-user access lists — fetched once `me.userid` is known. Reset when
+   * the user changes (e.g. logout/re-login in the same tab). */
+  useEffect(() => {
+    if (me?.userid == null) { setUserOrgs([]); setUserProductsModules([]); return; }
+    let cancelled = false;
+    Promise.all([
+      api.listUserOrgs(me.userid),
+      api.listUserProductsModules(me.userid),
+    ]).then(([o, p]) => {
+      if (cancelled) return;
+      setUserOrgs(o);
+      setUserProductsModules(p);
+    });
+    return () => { cancelled = true; };
+  }, [me?.userid]);
+
+  /* Index users by id so tasks can show the assignee's name/avatar. */
+  const usersById = useMemo(() => indexBy(lookups.users, u => u.userid), [lookups.users]);
+
+  /* Orgs the user is allowed to see — drives the Sidebar Clients list and
+   * the Client picker. Falls back to the full org list while the access
+   * call is still in flight, so we don't flash an empty sidebar. */
+  const accessibleOrgIds = useMemo(
+    () => new Set(userOrgs.map(r => r.organisationid)),
+    [userOrgs],
+  );
+  const accessibleOrgs = useMemo(() => {
+    if (!userOrgs.length) return lookups.orgs;
+    return lookups.orgs.filter(o => accessibleOrgIds.has(o.id ?? o.organisationid));
+  }, [lookups.orgs, userOrgs, accessibleOrgIds]);
+
+  /* Distinct products the user can write tasks against. Derived from the
+   * userproductsmodules rows where canwrite=true. */
+  const accessibleProducts = useMemo(() => {
+    const map = new Map();
+    userProductsModules.forEach(r => {
+      if (!r.canwrite) return;
+      if (map.has(r.productid)) return;
+      map.set(r.productid, { id: r.productid, productid: r.productid, name: r.productname });
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [userProductsModules]);
+
+  /* Single object passed to DetailPanel so its prop surface stays small. */
+  const detailLookups = useMemo(() => ({
+    ...lookups,
+    userOrgs,
+    userProductsModules,
+    accessibleOrgs,
+    accessibleProducts,
+  }), [lookups, userOrgs, userProductsModules, accessibleOrgs, accessibleProducts]);
+
+  /* Decorate every task with its assignee record, derived from createdbyuserid. */
+  const decoratedTasks = useMemo(
+    () => tasks.map(t => ({ ...t, assignee: t.assignee || usersById[t.createdbyuserid] || null })),
+    [tasks, usersById],
+  );
 
   /* ------- scope filtering ------- */
   const scopedTasks = useMemo(() => {
-    let arr = tasks;
-    if (scope === 'mine' && me)        arr = arr.filter(t => t.usersusername === me.username);
+    let arr = decoratedTasks;
+    if (scope === 'mine' && me?.userid != null) arr = arr.filter(t => t.createdbyuserid === me.userid);
     else if (scope === 'today')        arr = arr.filter(t => isToday(t.duedate));
     else if (scope === 'inbox')        arr = arr.slice(0, 3);
     else if (scope === 'view-urgent')  arr = arr.filter(t => t.priority === 'urgent');
@@ -91,14 +187,14 @@ export default function App({ user, hypermedia, isMock }) {
       arr = arr.filter(t => t.organisationid === id);
     }
     return arr;
-  }, [tasks, scope, me]);
+  }, [decoratedTasks, scope, me]);
 
   /* ------- filters + search ------- */
   const filteredTasks = useMemo(() => {
     let arr = scopedTasks;
     if (filters.status)   arr = arr.filter(t => normaliseStatus(t.status) === filters.status);
     if (filters.priority) arr = arr.filter(t => t.priority === filters.priority);
-    if (filters.assignee) arr = arr.filter(t => (t.assignee?.name || t.usersusername) === filters.assignee);
+    if (filters.assignee != null) arr = arr.filter(t => t.createdbyuserid === filters.assignee);
     if (search) {
       const q = search.toLowerCase();
       arr = arr.filter(t =>
@@ -121,22 +217,25 @@ export default function App({ user, hypermedia, isMock }) {
 
   const byOrg = useMemo(() => {
     const m = {};
-    tasks.forEach(t => {
+    decoratedTasks.forEach(t => {
       if (normaliseStatus(t.status) === 'done') return;
       m[t.organisationid] = (m[t.organisationid] || 0) + 1;
     });
     return m;
-  }, [tasks]);
+  }, [decoratedTasks]);
 
-  // Distinct assigner names — powers the Assigner filter dropdown
+  // Distinct assigners ({ value: userid, label: username }) — powers the
+  // Assigner filter chip on the toolbar.
   const assigneeOptions = useMemo(() => {
-    const names = new Set();
-    tasks.forEach(t => {
-      const n = t.assignee?.name || t.usersusername;
-      if (n) names.add(n);
+    const seen = new Map();
+    decoratedTasks.forEach(t => {
+      if (t.createdbyuserid == null) return;
+      if (seen.has(t.createdbyuserid)) return;
+      const u = usersById[t.createdbyuserid];
+      seen.set(t.createdbyuserid, { value: t.createdbyuserid, label: u?.username || u?.name || String(t.createdbyuserid) });
     });
-    return Array.from(names).sort();
-  }, [tasks]);
+    return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [decoratedTasks, usersById]);
 
   /* ------- mutations ------- */
   const onAfterPatch = useCallback((updatedTask) => {
@@ -147,24 +246,46 @@ export default function App({ user, hypermedia, isMock }) {
     setTasks(prev => prev.filter(t => t.taskid !== deletedTask.taskid));
   }, []);
 
-  const onCreate = async () => {
+  /* "New task" no longer POSTs. It opens an in-memory draft in the detail
+   * panel. The POST fires later, when the user clicks the Create button. */
+  const onNewTask = () => {
+    if (draftTask) return; // already drafting — ignore extra clicks/keystrokes
+    setSelectedId(null);
+    setDraftTask({
+      title:           '',
+      description:     null,
+      status:          'todo',
+      priority:        'medium',
+      duedate:         null,
+      taskgroupid:     lookups.taskgroups[0]?.id ?? lookups.taskgroups[0]?.taskgroupid ?? null,
+      organisationid:  null,
+      productid:       null,
+      moduleid:        null,
+      createdbyuserid: me?.userid ?? null,
+    });
+  };
+
+  const onDiscardDraft = useCallback(() => setDraftTask(null), []);
+
+  /* Commit the draft: single POST to /v2/tasks. On success, the saved row
+   * goes into the task list and the panel switches into normal (saved) mode. */
+  const onCommitDraft = useCallback(async (draft) => {
+    if (creating) return null;
+    setCreating(true);
     try {
-      const draft = {
-        title:       'New task',
-        description: null,
-        status:      'todo',
-        priority:    'medium',
-        duedate:     null,
-        taskgroupid: lookups.taskgroups[0]?.id ?? lookups.taskgroups[0]?.taskgroupid ?? null,
-        usersusername: me?.username ?? null,
-      };
       const created = await api.createTask(draft);
-      setTasks(prev => [created, ...prev]);
-      setSelectedId(created.taskid);
+      const decorated = { ...created, assignee: usersById[created.createdbyuserid] || null };
+      setTasks(prev => [decorated, ...prev]);
+      setDraftTask(null);
+      setSelectedId(decorated.taskid);
+      return decorated;
     } catch (err) {
       alert('Could not create task: ' + prettyErr(err));
+      return null;
+    } finally {
+      setCreating(false);
     }
-  };
+  }, [creating, usersById]);
 
   /* ------- keyboard shortcuts ------- */
   useEffect(() => {
@@ -173,13 +294,18 @@ export default function App({ user, hypermedia, isMock }) {
         if (e.key === 'Escape') e.target.blur();
         return;
       }
+      // Ignore modifier-key combos (Ctrl/Cmd+C copy, etc.)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === '/') {
         e.preventDefault();
         document.querySelector('.topbar-search input')?.focus();
-      } else if (e.key === 'Escape' && selectedId) {
-        setSelectedId(null);
-      } else if (e.key === 'c') {
-        onCreate();
+      } else if (e.key === 'Escape' && (selectedId || draftTask)) {
+        if (draftTask) setDraftTask(null);
+        else           setSelectedId(null);
+      } else if (e.key === 'c' && !selectedId && !draftTask) {
+        // Only open a draft from the list view — never while a panel is
+        // already open (prevents accidental duplicates while editing).
+        onNewTask();
       } else if (selectedId && (e.key === 'j' || e.key === 'k')) {
         const list = filteredTasks;
         const idx = list.findIndex(t => t.taskid === selectedId);
@@ -190,7 +316,7 @@ export default function App({ user, hypermedia, isMock }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, filteredTasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, filteredTasks, draftTask]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------- render ------- */
   const scopeLabel = labelForScope(scope, orgsById);
@@ -208,18 +334,18 @@ export default function App({ user, hypermedia, isMock }) {
         onSelect={setScope}
         scopeCount={tasks.length}
         byOrg={byOrg}
-        orgs={lookups.orgs}
+        orgs={accessibleOrgs}
         collapsed={prefs.sidebarCollapsed}
         me={me}
         inboxCount={3}
-        mineCount={me ? tasks.filter(t => t.usersusername === me.username).length : 0}
+        mineCount={me?.userid != null ? tasks.filter(t => t.createdbyuserid === me.userid).length : 0}
         todayCount={tasks.filter(t => isToday(t.duedate)).length}
       />
       <main className="main">
         <TopBar
           scopeLabel={scopeLabel}
           scopeSubtitle={scopeSubtitle}
-          onNew={onCreate}
+          onNew={onNewTask}
           onSearch={setSearch}
           search={search}
           theme={prefs.theme}
@@ -256,10 +382,15 @@ export default function App({ user, hypermedia, isMock }) {
 
       <DetailPanel
         taskId={selectedId}
+        draftTask={draftTask}
+        creating={creating}
         onClose={() => setSelectedId(null)}
         onNavigate={setSelectedId}
+        onDiscardDraft={onDiscardDraft}
+        onCommitDraft={onCommitDraft}
         allTasks={filteredTasks}
-        lookups={lookups}
+        lookups={detailLookups}
+        usersById={usersById}
         api={api}
         onAfterPatch={onAfterPatch}
         onAfterDelete={onAfterDelete}

@@ -47,7 +47,7 @@ function Card({ t, orgsById, onOpen, isSelected }) {
       <div className="card-foot">
         <span className="card-org">{org ? <OrgMark org={org} size={15}/> : null}<span>{org?.short || (org?.name?.slice(0,2)?.toUpperCase() ?? '')}</span></span>
         <DueChip iso={t.duedate} compact/>
-        <Avatar user={t.assignee} name={t.usersusername} size={18}/>
+        <Avatar user={t.assignee} size={18}/>
       </div>
     </div>
   );

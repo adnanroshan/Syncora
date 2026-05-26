@@ -1161,6 +1161,24 @@ kbd {
 }
 .detail-desc p { margin: 0; }
 .empty-text { color: var(--text-faint); }
+
+.audit {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--border);
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.audit-row { display: flex; align-items: baseline; gap: 8px; }
+.audit-label {
+  flex: 0 0 auto;
+  min-width: 110px;
+  font-weight: 500;
+  color: var(--text-muted, var(--text-faint));
+}
+.audit-value { color: var(--text); }
+
 .link-btn {
   background: none; border: none; padding: 0;
   color: var(--accent);
@@ -1377,18 +1395,6 @@ kbd {
 }
 .sidefield-popitem:hover { background: var(--surface-hover); }
 .sidefield-popitem > svg { flex-shrink: 0; }
-
-/* inline date input in sidefield */
-.sidefield-date {
-  background: transparent;
-  border: none;
-  font: inherit;
-  color: var(--text);
-  padding: 0;
-  width: 100px;
-  cursor: pointer;
-}
-.sidefield-date:focus { outline: none; }
 
 /* editable description textarea */
 .detail-desc-input {
@@ -1636,3 +1642,453 @@ kbd {
   font-family: inherit;
 }
 .usermenu-item:hover { background: var(--surface-hover); }
+
+/* ============================================================
+ * Due-date picker
+ * ============================================================ */
+
+.ddp {
+  position: relative;
+  width: 100%;
+}
+
+.ddp-trigger {
+  cursor: pointer;
+}
+
+.ddp-trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ddp-trigger-label.ddp-empty {
+  color: var(--text-faint);
+}
+
+/* Popover ---------------------------------------------------- */
+.ddp-pop {
+  position: fixed;        /* JS sets top / left / width at runtime */
+  z-index: 60;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 9px;
+  box-shadow: var(--shadow-pop, 0 8px 28px rgba(20, 18, 12, 0.12), 0 1px 0 rgba(0,0,0,0.02));
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Quick picks ------------------------------------------------ */
+.ddp-quick {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+.ddp-quick button {
+  background: var(--bg-elev);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+.ddp-quick button:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* Calendar header ------------------------------------------- */
+.ddp-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+.ddp-month {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: -0.005em;
+}
+.ddp-navbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 0.5px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ddp-navbtn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Day-of-week + grid ---------------------------------------- */
+.ddp-dow,
+.ddp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.ddp-dow {
+  margin-bottom: -2px;
+}
+.ddp-dow > div {
+  text-align: center;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  padding: 4px 0;
+  font-weight: 500;
+}
+
+.ddp-cell {
+  appearance: none;
+  background: transparent;
+  border: 0.5px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+.ddp-cell:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.ddp-cell.ddp-dim {
+  color: var(--text-faint);
+}
+.ddp-cell.ddp-today:not(.ddp-sel) {
+  border-color: var(--border-strong);
+  font-weight: 600;
+}
+.ddp-cell.ddp-sel,
+.ddp-cell.ddp-sel:hover {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+  border-color: var(--accent);
+}
+.ddp-cell.ddp-past {
+  color: var(--text-faint);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Time row --------------------------------------------------- */
+.ddp-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 2px 0;
+  border-top: 0.5px solid var(--border);
+}
+.ddp-time-label {
+  flex: 1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.ddp-time-sep {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.ddp-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-elev);
+  border: 0.5px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.ddp-select:hover {
+  border-color: var(--border-strong);
+}
+.ddp-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* Footer ----------------------------------------------------- */
+.ddp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 0.5px solid var(--border);
+}
+.ddp-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 5px;
+}
+.ddp-clear:hover:not(:disabled) {
+  color: var(--danger, #B0322D);
+  background: var(--danger-bg, #FBE9E9);
+}
+.ddp-clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ddp-done {
+  background: var(--accent);
+  color: #fff;
+  border: 0.5px solid var(--accent);
+  border-radius: 5px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ddp-done:hover {
+  filter: brightness(0.95);
+}
+
+/* ============================================================
+ * Assignees field
+ * ============================================================ */
+
+.assg { position: relative; width: 100%; }
+
+.assg-trigger {
+  cursor: pointer;
+}
+.assg-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.assg-empty {
+  flex: 1;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+/* Avatar stack ------------------------------------------------ */
+.assg-stack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-right: 2px;
+}
+.assg-stack-item {
+  position: relative;
+  margin-left: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1.5px var(--bg-elev);
+}
+.assg-stack-item:first-child { margin-left: 0; }
+.assg-stack-item.assg-primary {
+  box-shadow: 0 0 0 1.5px var(--bg-elev), 0 0 0 2.5px var(--accent);
+}
+.assg-stack-item.assg-overflow {
+  width: 20px; height: 20px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.assg-star {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1.5px var(--bg-elev);
+}
+
+.assg-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assg-extra {
+  color: var(--text-faint);
+  margin-left: 4px;
+  font-size: 11.5px;
+}
+
+/* Popover ----------------------------------------------------- */
+.assg-pop {
+  position: fixed;
+  z-index: 60;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 9px;
+  box-shadow: var(--shadow-pop, 0 8px 28px rgba(20, 18, 12, 0.12), 0 1px 0 rgba(0,0,0,0.02));
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assg-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-elev);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+.assg-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+  background: var(--surface);
+}
+.assg-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.assg-search input::placeholder { color: var(--text-faint); }
+
+/* User list -------------------------------------------------- */
+.assg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+.assg-empty-state {
+  padding: 10px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.assg-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+}
+.assg-row:hover { background: var(--surface-hover); }
+.assg-row.assg-row-on { background: var(--accent-bg); }
+.assg-row.assg-row-on:hover { background: var(--accent-bg); filter: brightness(0.98); }
+
+.assg-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.assg-check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 0.5px solid var(--border-strong);
+  background: var(--bg-elev);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+.assg-check.assg-check-on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.assg-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assg-handle {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.assg-starbtn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-faint);
+  cursor: pointer;
+  margin-right: 4px;
+}
+.assg-starbtn:hover { background: var(--surface); color: var(--text-muted); }
+.assg-starbtn.assg-starbtn-on { color: var(--accent); }
+
+.assg-footnote {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-top: 0.5px solid var(--border);
+}

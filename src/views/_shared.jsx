@@ -37,11 +37,12 @@ export function shortId(t) {
   return `SY-${n}`;
 }
 
-export function Row({ t, orgsById, onOpen, isSelected }) {
+export function Row({ t, orgsById, onOpen, isSelected, unread }) {
   const status = normaliseStatus(t.status);
   const org = orgsById?.[t.organisationid];
+  const hasUnread = (unread?.unreadCount || 0) > 0;
   return (
-    <div className={`row ${isSelected ? 'is-selected' : ''} ${status === 'done' ? 'is-done' : ''}`}
+    <div className={`row ${isSelected ? 'is-selected' : ''} ${status === 'done' ? 'is-done' : ''} ${hasUnread ? 'has-unread' : ''}`}
          onClick={() => onOpen(t.taskid)} tabIndex={0}>
       <span className="row-id">{shortId(t)}</span>
       <PriorityMark priority={t.priority}/>
@@ -54,9 +55,33 @@ export function Row({ t, orgsById, onOpen, isSelected }) {
         {org ? <OrgMark org={org} size={16}/> : null}
         <span className="row-org-name">{org?.name || t.organisationname}</span>
       </span>
+      <span className="row-unread"><UnreadBadges unread={unread}/></span>
       <DueChip iso={t.duedate} compact/>
       <Avatar user={t.assignee} size={20}/>
     </div>
+  );
+}
+
+export function UnreadBadges({ unread }) {
+  const mentions = unread?.mentionCount || 0;
+  const total    = unread?.unreadCount  || 0;
+  if (total <= 0) return null;
+  const neutralCount = total - mentions;
+  return (
+    <>
+      {mentions > 0 && (
+        <span className="unread-badge unread-badge--mention"
+              title={`${mentions} mention${mentions === 1 ? '' : 's'} in ${total} unread message${total === 1 ? '' : 's'}`}>
+          <Icon name="at" size={9}/>{mentions}
+        </span>
+      )}
+      {neutralCount > 0 && (
+        <span className="unread-badge"
+              title={`${neutralCount} unread message${neutralCount === 1 ? '' : 's'}`}>
+          <Icon name="comment" size={10}/>{neutralCount}
+        </span>
+      )}
+    </>
   );
 }
 

@@ -36,6 +36,8 @@ export default function App({ user, hypermedia, isMock }) {
   /* ------- data ------- */
   const [tasks, setTasks]     = useState([]);
   const [lookups, setLookups] = useState({ orgs: [], products: [], modules: [], taskgroups: [], users: [] });
+  const [allAssignees, setAllAssignees] = useState([]);
+  const [unreadRows, setUnreadRows] = useState([]);
   const [loading, setLoad]    = useState(true);
   const [error, setError]     = useState(null);
   const [creating, setCreating] = useState(false);
@@ -53,9 +55,10 @@ export default function App({ user, hypermedia, isMock }) {
   const reload = useCallback(async () => {
     setLoad(true); setError(null);
     try {
-      const { tasks, lookups } = await api.loadEverything();
+      const { tasks, lookups, assignees } = await api.loadEverything();
       setTasks(tasks);
       setLookups(lookups);
+      setAllAssignees(assignees || []);
     } catch (err) {
       setError(prettyErr(err));
     } finally {
@@ -167,11 +170,63 @@ export default function App({ user, hypermedia, isMock }) {
     accessibleProducts,
   }), [lookups, userOrgs, userProductsModules, accessibleOrgs, accessibleProducts]);
 
-  /* Decorate every task with its assignee record, derived from createdbyuserid. */
+  /* Group taskassignees by taskid so each task can resolve its primary assignee. */
+  const assigneesByTask = useMemo(() => {
+    const out = {};
+    (allAssignees || []).forEach(a => {
+      if (a?.taskid == null) return;
+      if (!out[a.taskid]) out[a.taskid] = [];
+      out[a.taskid].push(a);
+    });
+    return out;
+  }, [allAssignees]);
+
+  /* Per-task unread / mention counts (from /v2/taskunread). */
+  const unreadByTask = useMemo(() => {
+    const out = {};
+    (unreadRows || []).forEach(r => {
+      if (r?.taskid != null) out[r.taskid] = r;
+    });
+    return out;
+  }, [unreadRows]);
+
+  /* Decorate every task with its actual primary assignee (from taskassignees),
+   * falling back to the existing assignee field or the creator. */
   const decoratedTasks = useMemo(
-    () => tasks.map(t => ({ ...t, assignee: t.assignee || usersById[t.createdbyuserid] || null })),
-    [tasks, usersById],
+    () => tasks.map(t => {
+      const rows = assigneesByTask[t.taskid] || [];
+      const primary = rows.find(r => r.isprimary) || rows[0] || null;
+      const primaryUser = primary ? usersById[primary.assigneduserid] : null;
+      return {
+        ...t,
+        assignee: primaryUser || t.assignee || usersById[t.createdbyuserid] || null,
+      };
+    }),
+    [tasks, usersById, assigneesByTask],
   );
+
+  /* Refresh per-task unread counts (called on app load + when the detail
+   * panel closes so badges clear for a task you just read). */
+  const refreshUnread = useCallback(async () => {
+    if (me?.userid == null) { setUnreadRows([]); return; }
+    try {
+      const rows = await api.listMyUnread(me.userid);
+      setUnreadRows(rows || []);
+    } catch { /* swallow */ }
+  }, [me?.userid]);
+
+  useEffect(() => { refreshUnread(); }, [refreshUnread, tasks]);
+
+  /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */
+  useEffect(() => {
+    const totalUnread = unreadRows.reduce((n, r) => n + (r.unreadCount || 0), 0);
+    const totalMentions = unreadRows.reduce((n, r) => n + (r.mentionCount || 0), 0);
+    let prefix = '';
+    if (totalMentions > 0 && totalUnread > totalMentions)      prefix = `(@${totalMentions}·${totalUnread}) `;
+    else if (totalMentions > 0)                                 prefix = `(@${totalMentions}) `;
+    else if (totalUnread > 0)                                   prefix = `(${totalUnread}) `;
+    document.title = `${prefix}Syncora`;
+  }, [unreadRows]);
 
   /* ------- scope filtering ------- */
   const scopedTasks = useMemo(() => {
@@ -337,7 +392,8 @@ export default function App({ user, hypermedia, isMock }) {
         orgs={accessibleOrgs}
         collapsed={prefs.sidebarCollapsed}
         me={me}
-        inboxCount={3}
+        inboxCount={unreadRows.length}
+        inboxHasMentions={unreadRows.some(r => (r.mentionCount || 0) > 0)}
         mineCount={me?.userid != null ? tasks.filter(t => t.createdbyuserid === me.userid).length : 0}
         todayCount={tasks.filter(t => isToday(t.duedate)).length}
       />
@@ -371,10 +427,10 @@ export default function App({ user, hypermedia, isMock }) {
             </div>
           ) : (
             <>
-              {view === 'list'     && <ListView     tasks={filteredTasks} orgsById={orgsById} onOpen={setSelectedId} selectedId={selectedId} sortBy={sortBy}/>}
-              {view === 'board'    && <BoardView    tasks={filteredTasks} orgsById={orgsById} onOpen={setSelectedId} selectedId={selectedId} sortBy={sortBy}/>}
+              {view === 'list'     && <ListView     tasks={filteredTasks} orgsById={orgsById} onOpen={setSelectedId} selectedId={selectedId} sortBy={sortBy} unreadByTask={unreadByTask}/>}
+              {view === 'board'    && <BoardView    tasks={filteredTasks} orgsById={orgsById} onOpen={setSelectedId} selectedId={selectedId} sortBy={sortBy} unreadByTask={unreadByTask}/>}
               {view === 'calendar' && <CalendarView tasks={filteredTasks}                    onOpen={setSelectedId} selectedId={selectedId} anchor={calAnchor} onAnchorChange={setCalAnchor}/>}
-              {view === 'grouped'  && <GroupedView  tasks={filteredTasks} orgsById={orgsById} productsById={productsById} onOpen={setSelectedId} selectedId={selectedId} groupBy={groupBy} sortBy={sortBy}/>}
+              {view === 'grouped'  && <GroupedView  tasks={filteredTasks} orgsById={orgsById} productsById={productsById} onOpen={setSelectedId} selectedId={selectedId} groupBy={groupBy} sortBy={sortBy} unreadByTask={unreadByTask}/>}
             </>
           )}
         </div>
@@ -384,7 +440,7 @@ export default function App({ user, hypermedia, isMock }) {
         taskId={selectedId}
         draftTask={draftTask}
         creating={creating}
-        onClose={() => setSelectedId(null)}
+        onClose={() => { setSelectedId(null); refreshUnread(); }}
         onNavigate={setSelectedId}
         onDiscardDraft={onDiscardDraft}
         onCommitDraft={onCommitDraft}

@@ -4,7 +4,7 @@ import { Avatar } from './Shared.jsx';
 
 /* Side navigation. Smart lists at top, then per-client scopes, then saved views. */
 
-export function Sidebar({ active, onSelect, scopeCount, byOrg, orgs, collapsed, me, inboxCount, todayCount, mineCount }) {
+export function Sidebar({ active, onSelect, scopeCount, byOrg, orgs, collapsed, me, inboxCount, inboxHasMentions, todayCount, mineCount }) {
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="sb-brand">
@@ -24,7 +24,8 @@ export function Sidebar({ active, onSelect, scopeCount, byOrg, orgs, collapsed, 
       </div>
 
       <nav className="sb-section">
-        <SBItem id="inbox" icon="inbox"   label="Inbox"    count={inboxCount} active={active} onSelect={onSelect} collapsed={collapsed}/>
+        <SBItem id="inbox" icon="inbox"   label="Inbox"    count={inboxCount} active={active} onSelect={onSelect} collapsed={collapsed}
+                hasUnread={inboxCount > 0} hasMentions={inboxHasMentions}/>
         <SBItem id="mine"  icon="mytasks" label="My tasks" count={mineCount}  active={active} onSelect={onSelect} collapsed={collapsed}/>
         <SBItem id="today" icon="today"   label="Today"    count={todayCount} active={active} onSelect={onSelect} collapsed={collapsed}/>
         <SBItem id="all"   icon="all"     label="All work" count={scopeCount} active={active} onSelect={onSelect} collapsed={collapsed}/>
@@ -80,11 +81,18 @@ export function Sidebar({ active, onSelect, scopeCount, byOrg, orgs, collapsed, 
   );
 }
 
-function SBItem({ id, icon, custom, label, count, active, onSelect, collapsed }) {
+function SBItem({ id, icon, custom, label, count, active, onSelect, collapsed, hasUnread, hasMentions }) {
+  const cls = [
+    'sb-item',
+    active === id ? 'is-active' : '',
+    hasUnread ? 'has-unread' : '',
+    hasMentions ? 'has-mentions' : '',
+  ].filter(Boolean).join(' ');
   return (
-    <button className={`sb-item ${active === id ? 'is-active' : ''}`} onClick={() => onSelect(id)} title={collapsed ? label : undefined}>
+    <button className={cls} onClick={() => onSelect(id)} title={collapsed ? label : undefined}>
       <span className="sb-item-icon">{custom || (icon && <Icon name={icon} size={15} />)}</span>
       {!collapsed && <span className="sb-item-label">{label}</span>}
+      {!collapsed && hasMentions && <span className="sb-mention-pip" aria-hidden="true"/>}
       {!collapsed && count != null && count > 0 && <span className="sb-item-count">{count}</span>}
     </button>
   );

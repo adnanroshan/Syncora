@@ -34,11 +34,12 @@ export async function loadEverything() {
   if (!IS_MOCK && h && !h.tasks) {
     throw mkError(403, 'forbidden', 'You do not have access to tasks.');
   }
-  const [tasksPage, lookups] = await Promise.all([
+  const [tasksPage, lookups, assignees] = await Promise.all([
     listTasks(),
     loadLookups(),
+    listAllAssignees(),
   ]);
-  return { tasks: tasksPage.collection || [], count: tasksPage.count, lookups };
+  return { tasks: tasksPage.collection || [], count: tasksPage.count, lookups, assignees };
 }
 
 export async function listTasks() {
@@ -129,6 +130,21 @@ export async function listSubtasks(parenttaskid) {
   if (parenttaskid == null) return [];
   const r = await restful({ url: `~/v2/tasks?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})` });
   return r?.collection || [];
+}
+
+export async function listAllAssignees() {
+  try {
+    const r = await restful({ url: '~/v2/taskassignees' });
+    return r?.collection || [];
+  } catch { return []; }
+}
+
+export async function listMyUnread(userid) {
+  if (userid == null) return [];
+  try {
+    const r = await restful({ url: `~/v2/taskunread?userid=${encodeURIComponent(userid)}` });
+    return r?.collection || [];
+  } catch { return []; }
 }
 
 /* ------------------------------------------------------------ *
@@ -562,6 +578,36 @@ function handleMock({ method = 'GET', url, body } = {}) {
     const row = { ...body };
     MOCK.taskMessageReads.push(row);
     return row;
+  }
+
+  /* ---------- Per-user per-task unread counts (synthesized in mock) ---------- */
+  if (method === 'GET' && path === '/v2/taskunread') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const u = q.match(/userid=(\d+)/);
+    if (!u) return { collection: [] };
+    const userid = parseInt(u[1], 10);
+    const reads = new Map(
+      MOCK.taskMessageReads
+        .filter(r => r.userid === userid)
+        .map(r => [r.taskid, r.lastreadmessageid ?? 0]),
+    );
+    const mentionMessageIds = new Set(
+      MOCK.taskMessageMentions
+        .filter(m => m.userid === userid)
+        .map(m => m.messageid),
+    );
+    const byTask = new Map();
+    for (const m of MOCK.taskMessages) {
+      if (m.isdeleted) continue;
+      if (m.userid === userid) continue;
+      const lastRead = reads.has(m.taskid) ? reads.get(m.taskid) : 0;
+      if (m.messageid <= lastRead) continue;
+      const cur = byTask.get(m.taskid) || { taskid: m.taskid, unreadCount: 0, mentionCount: 0 };
+      cur.unreadCount += 1;
+      if (mentionMessageIds.has(m.messageid)) cur.mentionCount += 1;
+      byTask.set(m.taskid, cur);
+    }
+    return { collection: Array.from(byTask.values()) };
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {

@@ -3,7 +3,7 @@ import { Icon } from '../components/Icons.jsx';
 import { OrgMark } from '../components/Shared.jsx';
 import { sortTasks, Row } from './_shared.jsx';
 
-export function GroupedView({ tasks, orgsById, productsById, onOpen, selectedId, groupBy, sortBy }) {
+export function GroupedView({ tasks, orgsById, productsById, onOpen, selectedId, groupBy, sortBy, unreadByTask }) {
   const groups = new Map();
   tasks.forEach(t => {
     let key, label, sub, org;
@@ -55,7 +55,7 @@ export function GroupedView({ tasks, orgsById, productsById, onOpen, selectedId,
             </header>
             <div className="grp-rows">
               {g.items.slice(0, 6).map(t => (
-                <Row key={t.taskid} t={t} orgsById={orgsById} onOpen={onOpen} isSelected={selectedId === t.taskid}/>
+                <Row key={t.taskid} t={t} orgsById={orgsById} onOpen={onOpen} isSelected={selectedId === t.taskid} unread={unreadByTask?.[t.taskid]}/>
               ))}
               {g.items.length > 6 && <button className="grp-more">Show {g.items.length - 6} more</button>}
             </div>

@@ -3,7 +3,7 @@ import { Icon, StatusGlyph } from '../components/Icons.jsx';
 import { normaliseStatus } from '../components/Shared.jsx';
 import { STATUSES, sortTasks, Row, Empty } from './_shared.jsx';
 
-export function ListView({ tasks, orgsById, onOpen, selectedId, sortBy }) {
+export function ListView({ tasks, orgsById, onOpen, selectedId, sortBy, unreadByTask }) {
   const sorted = sortTasks(tasks, sortBy);
   const groups = STATUSES
     .map(s => ({ ...s, items: sorted.filter(t => normaliseStatus(t.status) === s.key) }))
@@ -24,7 +24,7 @@ export function ListView({ tasks, orgsById, onOpen, selectedId, sortBy }) {
           </header>
           <div className="list-rows">
             {g.items.map(t => (
-              <Row key={t.taskid} t={t} orgsById={orgsById} onOpen={onOpen} isSelected={selectedId === t.taskid}/>
+              <Row key={t.taskid} t={t} orgsById={orgsById} onOpen={onOpen} isSelected={selectedId === t.taskid} unread={unreadByTask?.[t.taskid]}/>
             ))}
           </div>
         </section>

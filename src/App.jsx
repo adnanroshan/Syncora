@@ -391,6 +391,7 @@ export default function App({ user, hypermedia, isMock }) {
         allTasks={filteredTasks}
         lookups={detailLookups}
         usersById={usersById}
+        currentUser={me}
         api={api}
         onAfterPatch={onAfterPatch}
         onAfterDelete={onAfterDelete}

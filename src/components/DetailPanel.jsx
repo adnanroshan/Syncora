@@ -16,11 +16,12 @@ import {
 import { DueDatePicker } from './DueDatePicker.jsx';
 import { AssigneesField } from './AssigneesField.jsx';
 import { Subtasks } from './Subtasks.jsx';
+import { ActivityDiscussion } from './ActivityDiscussion.jsx';
 
 export function DetailPanel({
   taskId, draftTask, creating,
   onClose, onNavigate, onDiscardDraft, onCommitDraft,
-  allTasks, lookups, usersById, api, onAfterPatch, onAfterDelete,
+  allTasks, lookups, usersById, currentUser, api, onAfterPatch, onAfterDelete,
 }) {
   const isDraft = !!draftTask;
   const [task, setTask]     = useState(null);
@@ -312,7 +313,15 @@ export function DetailPanel({
                   disabled={isDraft}
                 />
 
-                {!isDraft && <Audit task={task} assignee={assignee}/>}
+                {!isDraft && (
+                  <ActivityDiscussion
+                    task={task}
+                    currentUser={currentUser}
+                    usersById={usersById}
+                    lookups={lookups}
+                    api={api}
+                  />
+                )}
               </>
             ) : null}
           </div>

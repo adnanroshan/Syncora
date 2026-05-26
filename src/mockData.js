@@ -263,4 +263,109 @@ const taskAssignees = [
   { taskid: 1004, assigneduserid: 4, isprimary: true  },
 ];
 
-export const SEED = { users, orgs, products, modules, taskgroups, tasks, userOrgs, userProductsModules, taskAssignees };
+/* ----- Activity & Discussion seeds (scoped to task 1000 for demo) ----- */
+const minsAgo  = (m) => new Date(Date.now() - m * 60_000).toISOString();
+const hoursAgo = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+const daysAgoIso = (d) => new Date(Date.now() - d * 86400_000).toISOString();
+
+const taskActivity = [
+  { activityid: 1, taskid: 1000, userid: 1, userUsername: 'mira.chen',
+    activitytype: 'Task Created', creationdate: daysAgoIso(3) },
+  { activityid: 2, taskid: 1000, userid: 1, userUsername: 'mira.chen',
+    activitytype: 'Priority Changed', fieldname: 'priority',
+    oldvalue: 'medium', newvalue: 'high', creationdate: daysAgoIso(3) },
+  { activityid: 3, taskid: 1000, userid: 1, userUsername: 'mira.chen',
+    activitytype: 'Assignee Added', fieldname: 'assigneduserid',
+    newvalue: 8, creationdate: daysAgoIso(3) },
+  { activityid: 4, taskid: 1000, userid: 8, userUsername: 'me',
+    activitytype: 'Status Changed', fieldname: 'status',
+    oldvalue: 'todo', newvalue: 'inprogress', creationdate: daysAgoIso(2) },
+  { activityid: 5, taskid: 1000, userid: 8, userUsername: 'me',
+    activitytype: 'Subtask Added', fieldname: 'subtask',
+    newvalue: 'Reproduce on staging', creationdate: daysAgoIso(2) },
+  { activityid: 6, taskid: 1000, userid: 8, userUsername: 'me',
+    activitytype: 'Subtask Completed', fieldname: 'subtask',
+    newvalue: 'Reproduce on staging', creationdate: daysAgoIso(1) },
+  { activityid: 7, taskid: 1000, userid: 1, userUsername: 'mira.chen',
+    activitytype: 'Due Date Extended', fieldname: 'duedate',
+    oldvalue: '5/26/2026', newvalue: '5/27/2026', creationdate: hoursAgo(4) },
+  { activityid: 8, taskid: 1000, userid: 8, userUsername: 'me',
+    activitytype: 'Description Changed', fieldname: 'description',
+    creationdate: hoursAgo(2) },
+];
+
+const taskMessages = [
+  { messageid: 1, taskid: 1000, parentmessageid: null,
+    userid: 1, userUsername: 'mira.chen',
+    messagetext: 'Picked this up — going to repro on staging first. Will post findings.',
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: daysAgoIso(2) },
+  { messageid: 2, taskid: 1000, parentmessageid: 1,
+    userid: 8, userUsername: 'me',
+    messagetext: "Cool, ping me when you have the HAR — I have a hunch it's in ClaimMapper.",
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: daysAgoIso(2) },
+  { messageid: 3, taskid: 1000, parentmessageid: 1,
+    userid: 1, userUsername: 'mira.chen',
+    messagetext: "Repro'd. HAR attached. @me your hunch was right.",
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: hoursAgo(20) },
+  { messageid: 4, taskid: 1000, parentmessageid: null,
+    userid: 3, userUsername: 'aria.singh',
+    messagetext: "Audit log says NPE in ClaimMapper.map() when SAML has no `nameid`. Going to try defaulting to `email`.",
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: hoursAgo(6) },
+  { messageid: 5, taskid: 1000, parentmessageid: null,
+    userid: 8, userUsername: 'me',
+    messagetext: 'wrong thread, sorry',
+    isedited: false, editeddate: null,
+    isdeleted: true, deleteddate: hoursAgo(5),
+    creationdate: hoursAgo(5) },
+  { messageid: 6, taskid: 1000, parentmessageid: null,
+    userid: 1, userUsername: 'mira.chen',
+    messagetext: "@aria.singh confirmed — defaulting to email works for new tenants but breaks the ones we provisioned manually. PR up: #4421.",
+    isedited: true, editeddate: hoursAgo(1),
+    isdeleted: false, deleteddate: null,
+    creationdate: hoursAgo(2) },
+  { messageid: 7, taskid: 1000, parentmessageid: 6,
+    userid: 3, userUsername: 'aria.singh',
+    messagetext: 'Reviewing now 👀',
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: hoursAgo(1) },
+  { messageid: 8, taskid: 1000, parentmessageid: null,
+    userid: 3, userUsername: 'aria.singh',
+    messagetext: "Bringing this up in @mira.chen's standup tomorrow.",
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: minsAgo(30) },
+  { messageid: 9, taskid: 1000, parentmessageid: null,
+    userid: 1, userUsername: 'mira.chen',
+    messagetext: 'Sounds good. @jules.okafor can you join too?',
+    isedited: false, editeddate: null, isdeleted: false, deleteddate: null,
+    creationdate: minsAgo(12) },
+];
+
+const taskMessageReactions = [
+  { messageid: 4, userid: 1, emoji: '👍', creationdate: hoursAgo(5) },
+  { messageid: 4, userid: 8, emoji: '👍', creationdate: hoursAgo(5) },
+  { messageid: 4, userid: 1, emoji: '🧠', creationdate: hoursAgo(5) },
+  { messageid: 6, userid: 3, emoji: '🎉', creationdate: hoursAgo(1) },
+  { messageid: 6, userid: 8, emoji: '🎉', creationdate: hoursAgo(1) },
+  { messageid: 7, userid: 1, emoji: '✅', creationdate: minsAgo(50) },
+];
+
+const taskMessageMentions = [
+  { messageid: 3, userid: 8, creationdate: hoursAgo(20) },
+  { messageid: 6, userid: 3, creationdate: hoursAgo(2) },
+  { messageid: 8, userid: 1, creationdate: minsAgo(30) },
+  { messageid: 9, userid: 2, creationdate: minsAgo(12) },
+];
+
+const taskMessageReads = [
+  { taskid: 1000, userid: 8, lastreadmessageid: 6, lastreaddate: hoursAgo(1) },
+];
+
+export const SEED = {
+  users, orgs, products, modules, taskgroups, tasks,
+  userOrgs, userProductsModules, taskAssignees,
+  taskActivity, taskMessages, taskMessageReactions, taskMessageMentions, taskMessageReads,
+};

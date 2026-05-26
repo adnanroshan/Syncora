@@ -132,6 +132,103 @@ export async function listSubtasks(parenttaskid) {
 }
 
 /* ------------------------------------------------------------ *
+ * Activity & Discussion                                          *
+ * ------------------------------------------------------------ */
+
+export async function listActivity(taskid) {
+  if (taskid == null) return [];
+  const r = await restful({ url: `~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&order=creationdate%20desc&limit=100` });
+  return r?.collection || [];
+}
+
+export async function listMessages(taskid) {
+  if (taskid == null) return [];
+  const r = await restful({ url: `~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&order=creationdate&limit=50` });
+  return r?.collection || [];
+}
+
+export async function createMessage({ taskid, userid, parentmessageid = null, messagetext }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskmessages',
+    body: { taskid, userid, parentmessageid, messagetext },
+  });
+}
+
+export async function editMessage(messageid, messagetext) {
+  return restful({
+    method: 'PATCH',
+    url: `~/v2/taskmessages/${encodeURIComponent(messageid)}`,
+    body: { messagetext, isedited: true, editeddate: new Date().toISOString() },
+  });
+}
+
+export async function softDeleteMessage(messageid) {
+  return restful({
+    method: 'PATCH',
+    url: `~/v2/taskmessages/${encodeURIComponent(messageid)}`,
+    body: { isdeleted: true, deleteddate: new Date().toISOString() },
+  });
+}
+
+export async function addMention({ messageid, userid }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskmessagementions',
+    body: { messageid, userid },
+  });
+}
+
+export async function listMentionsForMessages(messageids) {
+  if (!messageids?.length) return [];
+  const list = messageids.map(i => encodeURIComponent(i)).join(',');
+  const r = await restful({ url: `~/v2/taskmessagementions?filter=(messageid%20IN%20(${list}))&limit=200` });
+  return r?.collection || [];
+}
+
+export async function listReactionsForMessages(messageids) {
+  if (!messageids?.length) return [];
+  const list = messageids.map(i => encodeURIComponent(i)).join(',');
+  const r = await restful({ url: `~/v2/taskmessagereactions?filter=(messageid%20IN%20(${list}))&limit=500` });
+  return r?.collection || [];
+}
+
+export async function addReaction({ messageid, userid, emoji }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskmessagereactions',
+    body: { messageid, userid, emoji },
+  });
+}
+
+export async function removeReaction({ messageid, userid, emoji }) {
+  const key = [messageid, userid, emoji].map(encodeURIComponent).join(',');
+  return restful({ method: 'DELETE', url: `~/v2/taskmessagereactions/${key}` });
+}
+
+export async function getReadMarker(taskid, userid) {
+  try {
+    return await restful({ url: `~/v2/taskmessagereads/${encodeURIComponent(taskid)},${encodeURIComponent(userid)}` });
+  } catch (err) {
+    if (err?.code === 404) return null;
+    throw err;
+  }
+}
+
+export async function upsertReadMarker(taskid, userid, lastreadmessageid) {
+  const key  = `${encodeURIComponent(taskid)},${encodeURIComponent(userid)}`;
+  const body = { lastreadmessageid, lastreaddate: new Date().toISOString() };
+  try {
+    return await restful({ method: 'PATCH', url: `~/v2/taskmessagereads/${key}`, body });
+  } catch (err) {
+    if (err?.code === 404) {
+      return await restful({ method: 'POST', url: '~/v2/taskmessagereads', body: { taskid, userid, ...body } });
+    }
+    throw err;
+  }
+}
+
+/* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
 export async function loadLookups() {
@@ -187,7 +284,14 @@ const MOCK = {
   userOrgs:             SEED.userOrgs.slice(),
   userProductsModules:  SEED.userProductsModules.slice(),
   taskAssignees:        (SEED.taskAssignees || []).slice(),
+  taskActivity:         (SEED.taskActivity || []).slice(),
+  taskMessages:         (SEED.taskMessages || []).slice(),
+  taskMessageReactions: (SEED.taskMessageReactions || []).slice(),
+  taskMessageMentions:  (SEED.taskMessageMentions || []).slice(),
+  taskMessageReads:     (SEED.taskMessageReads || []).slice(),
   nextId:               Math.max(...SEED.tasks.map(t => t.taskid)) + 1,
+  nextMessageId:        Math.max(0, ...((SEED.taskMessages || []).map(m => m.messageid))) + 1,
+  nextActivityId:       Math.max(0, ...((SEED.taskActivity || []).map(a => a.activityid))) + 1,
 };
 
 function handleMock({ method = 'GET', url, body } = {}) {
@@ -325,6 +429,139 @@ function handleMock({ method = 'GET', url, body } = {}) {
     }
     const row = MOCK.taskAssignees.find(r => r.taskid === tid && r.assigneduserid === uid);
     return row ? decorateAssignee(row) : {};
+  }
+
+  /* ---------- Activity ---------- */
+  if (method === 'GET' && path === '/v2/taskactivity') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/taskid=(\d+)/);
+    let rows = MOCK.taskActivity;
+    if (m) rows = rows.filter(a => a.taskid === parseInt(m[1], 10));
+    rows = [...rows].sort((a, b) => new Date(b.creationdate) - new Date(a.creationdate));
+    return { collection: rows };
+  }
+
+  /* ---------- Messages ---------- */
+  if (method === 'GET' && path === '/v2/taskmessages') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/taskid=(\d+)/);
+    let rows = MOCK.taskMessages;
+    if (m) rows = rows.filter(x => x.taskid === parseInt(m[1], 10));
+    rows = [...rows].sort((a, b) => new Date(a.creationdate) - new Date(b.creationdate));
+    return { collection: rows };
+  }
+  if (method === 'POST' && path === '/v2/taskmessages') {
+    const id  = MOCK.nextMessageId++;
+    const now = new Date().toISOString();
+    const row = {
+      messageid:       id,
+      taskid:          body.taskid,
+      parentmessageid: body.parentmessageid ?? null,
+      userid:          body.userid,
+      messagetext:     body.messagetext,
+      isedited:        false,
+      editeddate:      null,
+      isdeleted:       false,
+      deleteddate:     null,
+      creationdate:    now,
+    };
+    MOCK.taskMessages.push(row);
+    return row;
+  }
+  if (method === 'PATCH' && path.startsWith('/v2/taskmessages/')) {
+    const id = parseInt(path.split('/').pop(), 10);
+    const i  = MOCK.taskMessages.findIndex(m => m.messageid === id);
+    if (i < 0) throw mkError(404, 'not_found', 'Message not found');
+    MOCK.taskMessages[i] = { ...MOCK.taskMessages[i], ...body };
+    return MOCK.taskMessages[i];
+  }
+  if (method === 'DELETE' && path.startsWith('/v2/taskmessages/')) {
+    const id = parseInt(path.split('/').pop(), 10);
+    MOCK.taskMessages = MOCK.taskMessages.filter(m => m.messageid !== id);
+    return {};
+  }
+
+  /* ---------- Mentions ---------- */
+  if (method === 'GET' && path === '/v2/taskmessagementions') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const inMatch = q.match(/messageid\s+IN\s+\(([^)]+)\)/i);
+    const userMatch = q.match(/userid=(\d+)/);
+    let rows = MOCK.taskMessageMentions;
+    if (inMatch) {
+      const ids = inMatch[1].split(',').map(s => parseInt(s.trim(), 10));
+      rows = rows.filter(r => ids.includes(r.messageid));
+    }
+    if (userMatch) rows = rows.filter(r => r.userid === parseInt(userMatch[1], 10));
+    return { collection: rows };
+  }
+  if (method === 'POST' && path === '/v2/taskmessagementions') {
+    const exists = MOCK.taskMessageMentions.some(
+      r => r.messageid === body.messageid && r.userid === body.userid
+    );
+    if (exists) throw mkError(409, 'duplicate', 'Mention exists');
+    const row = { ...body, creationdate: new Date().toISOString() };
+    MOCK.taskMessageMentions.push(row);
+    return row;
+  }
+
+  /* ---------- Reactions ---------- */
+  if (method === 'GET' && path === '/v2/taskmessagereactions') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const inMatch = q.match(/messageid\s+IN\s+\(([^)]+)\)/i);
+    let rows = MOCK.taskMessageReactions;
+    if (inMatch) {
+      const ids = inMatch[1].split(',').map(s => parseInt(s.trim(), 10));
+      rows = rows.filter(r => ids.includes(r.messageid));
+    }
+    return { collection: rows };
+  }
+  if (method === 'POST' && path === '/v2/taskmessagereactions') {
+    const exists = MOCK.taskMessageReactions.some(
+      r => r.messageid === body.messageid && r.userid === body.userid && r.emoji === body.emoji
+    );
+    if (exists) throw mkError(409, 'duplicate', 'Reaction exists');
+    const row = { ...body, creationdate: new Date().toISOString() };
+    MOCK.taskMessageReactions.push(row);
+    return row;
+  }
+  if (method === 'DELETE' && path.startsWith('/v2/taskmessagereactions/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [m, u, e] = key.split(',');
+    const mid = parseInt(m, 10);
+    const uid = parseInt(u, 10);
+    MOCK.taskMessageReactions = MOCK.taskMessageReactions.filter(
+      r => !(r.messageid === mid && r.userid === uid && r.emoji === e)
+    );
+    return {};
+  }
+
+  /* ---------- Read markers ---------- */
+  if (method === 'GET' && path.startsWith('/v2/taskmessagereads/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [t, u] = key.split(',').map(s => parseInt(s, 10));
+    const row = MOCK.taskMessageReads.find(r => r.taskid === t && r.userid === u);
+    if (!row) throw mkError(404, 'not_found', 'Read marker not found');
+    return row;
+  }
+  if (method === 'PATCH' && path.startsWith('/v2/taskmessagereads/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [t, u] = key.split(',').map(s => parseInt(s, 10));
+    const i = MOCK.taskMessageReads.findIndex(r => r.taskid === t && r.userid === u);
+    if (i < 0) throw mkError(404, 'not_found', 'Read marker not found');
+    MOCK.taskMessageReads[i] = { ...MOCK.taskMessageReads[i], ...body };
+    return MOCK.taskMessageReads[i];
+  }
+  if (method === 'POST' && path === '/v2/taskmessagereads') {
+    const i = MOCK.taskMessageReads.findIndex(
+      r => r.taskid === body.taskid && r.userid === body.userid
+    );
+    if (i >= 0) {
+      MOCK.taskMessageReads[i] = { ...MOCK.taskMessageReads[i], ...body };
+      return MOCK.taskMessageReads[i];
+    }
+    const row = { ...body };
+    MOCK.taskMessageReads.push(row);
+    return row;
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {

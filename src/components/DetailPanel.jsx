@@ -88,6 +88,22 @@ export function DetailPanel({
     }
   };
 
+  const removeAssignee = async () => {
+    if (!task) return;
+    const assigneduserid = task.assignee?.id ?? task.assignee?.usersid ?? task.assigneduserid;
+    if (!assigneduserid) return;
+    const previous = task;
+    setTask({ ...task, assignee: null, usersusername: null });
+    try {
+      const saved = await api.removeAssignee(task.taskid, assigneduserid);
+      setTask(prev => ({ ...prev, ...saved, assignee: null, usersusername: null }));
+      onAfterPatch?.({ ...previous, ...saved, assignee: null, usersusername: null });
+    } catch (err) {
+      setTask(previous);
+      alert('Could not remove assignee: ' + prettyErr(err));
+    }
+  };
+
   const onSaveTitle = () => {
     setEditingTitle(false);
     if (titleDraft !== task?.title) patch('title', titleDraft);
@@ -293,25 +309,13 @@ export function DetailPanel({
                       <Icon name="chevron-d" size={11}/>
                     </>
                   }
-                  options={[
-                    { value: null, label: 'Unassigned' },
-                    ...((lookups?.users) || []).map(u => ({ value: u.userid, label: u.username || u.name })),
-                  ]}
-                  onPick={(v) => { patch('createdbyuserid', v ?? null); setOpenPicker(null); }}
-                  render={(opt) => <><Avatar name={opt.label || '·'} size={16}/><span>{opt.label}</span></>}
-                />
-              </SideField>
-
-              <SideField label="Assignees">
-                <AssigneesField
-                  taskId={task.taskid}
-                  organisationid={task.organisationid}
-                  productid={task.productid}
-                  moduleid={task.moduleid}
-                  users={lookups?.users || []}
-                  usersById={usersById || {}}
-                  api={api}
-                  disabled={isDraft}
+                  options={[{ value: '', label: 'Unassigned' }, ...(lookups?.users || []).map(u => ({ value: u.username, label: u.username }))]}
+                  onPick={(v) => {
+                    setOpenPicker(null);
+                    if (!v) removeAssignee();
+                    else patch('usersusername', v);
+                  }}
+                  render={(opt) => <><Avatar name={opt.value || '·'} size={16}/><span>{opt.label}</span></>}
                 />
               </SideField>
 

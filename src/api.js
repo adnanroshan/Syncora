@@ -64,110 +64,11 @@ export async function deleteTask(task) {
   return restful({ method: 'DELETE', url });
 }
 
-/* Find a single user by username — used to resolve the logged-in user's
- * numeric `userid`, which we then write to tasks as `createdbyuserid`.
- * Returns null on no-match or any error.
- */
-export async function findUserByUsername(username) {
-  if (!username) return null;
-  const safe = String(username).replace(/'/g, "''");
-  const filter = `(username='${safe}')`;
-  try {
-    const r = await restful({ url: `~/v2/users?filter=${encodeURIComponent(filter)}` });
-    return r?.collection?.[0] || null;
-  } catch {
-    return null;
-  }
-}
-
-/* Per-user access lists. Both are scoped to the logged-in user via the
- * (userid=N) filter, and both return [] on any error so the UI degrades
- * to "no access" rather than throwing. */
-export async function listUserOrgs(userid) {
-  if (userid == null) return [];
-  const filter = `(userid=${userid})`;
-  try {
-    const r = await restful({ url: `~/v2/userorgs?filter=${encodeURIComponent(filter)}` });
-    return r?.collection || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function listUserProductsModules(userid) {
-  if (userid == null) return [];
-  const filter = `(userid=${userid})`;
-  try {
-    const r = await restful({ url: `~/v2/userproductsmodules?filter=${encodeURIComponent(filter)}` });
-    return r?.collection || [];
-  } catch {
-    return [];
-  }
-}
-
-/* Eligibility lookups for the Assignees picker. Each returns the raw
- * access rows for a given scope; the caller intersects userids to figure
- * out who can be assigned. Always [] on error so the picker just shows
- * no candidates rather than throwing. */
-export async function listOrgAccessRows(organisationid) {
-  if (organisationid == null) return [];
-  const filter = `(organisationid=${organisationid})`;
-  try {
-    const r = await restful({ url: `~/v2/userorgs?filter=${encodeURIComponent(filter)}` });
-    return r?.collection || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function listProductAccessRows(productid) {
-  if (productid == null) return [];
-  const filter = `(productid=${productid})`;
-  try {
-    const r = await restful({ url: `~/v2/userproductsmodules?filter=${encodeURIComponent(filter)}` });
-    return r?.collection || [];
-  } catch {
-    return [];
-  }
-}
-
-/* ------------------------------------------------------------ *
- * Task assignees                                                 *
- * Composite key on the resource is `taskid,assigneduserid`.      *
- * ------------------------------------------------------------ */
-export async function listAssignees(taskid) {
-  if (taskid == null) return [];
-  const filter = `(taskid=${taskid})`;
-  try {
-    const r = await restful({ url: `~/v2/taskassignees?filter=${encodeURIComponent(filter)}` });
-    return r?.collection || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function addAssignee({ taskid, assigneduserid, isprimary = false }) {
+export async function removeAssignee(taskid, assigneduserid) {
   return restful({
     method: 'POST',
-    url: '~/v2/taskassignees',
-    body: { taskid, assigneduserid, isprimary },
-  });
-}
-
-export async function removeAssignee(taskid, assigneduserid) {
-  const key = `${taskid},${assigneduserid}`;
-  return restful({
-    method: 'DELETE',
-    url: `~/v2/taskassignees/${encodeURIComponent(key)}`,
-  });
-}
-
-export async function setPrimaryAssignee(taskid, assigneduserid) {
-  const key = `${taskid},${assigneduserid}`;
-  return restful({
-    method: 'PATCH',
-    url: `~/v2/taskassignees/${encodeURIComponent(key)}`,
-    body: { isprimary: true },
+    url: '~/v2/taskassignees/ra',
+    body: { parameters: { taskid, assigneduserid } },
   });
 }
 
@@ -261,6 +162,19 @@ function handleMock({ method = 'GET', url, body } = {}) {
     const id = parseInt(path.split('/').pop(), 10);
     MOCK.tasks = MOCK.tasks.filter(x => x.taskid !== id);
     return {};
+  }
+  if (method === 'POST' && path === '/v2/taskassignees/ra') {
+    const id = body?.parameters?.taskid;
+    const i  = MOCK.tasks.findIndex(x => x.taskid === id);
+    if (i < 0) throw mkError(404, 'not_found', 'Task not found');
+    const merged = decorateTask({
+      ...MOCK.tasks[i],
+      usersusername: null,
+      assignee: null,
+      lastmodifieddate: new Date().toISOString(),
+    });
+    MOCK.tasks[i] = merged;
+    return withLinks(merged);
   }
 
   if (method === 'GET' && path === '/v2/organisation') return { collection: MOCK.orgs };

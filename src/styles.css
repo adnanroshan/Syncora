@@ -2129,3 +2129,96 @@ kbd {
 .detail-menu-item-danger:hover {
   background: rgba(210, 63, 63, 0.08);
 }
+
+/* Detail-panel Subtasks block */
+.subtasks {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--border);
+}
+.subtasks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.subtasks-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.subtasks-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-soft, var(--text-faint));
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.subtasks-add-btn:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  color: var(--text);
+}
+.subtasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.subtasks-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.subtasks-item:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+.subtasks-item-title {
+  flex: 1;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subtasks-item-id {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.subtasks-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  list-style: none;
+}
+.subtasks-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.subtasks-add-input {
+  flex: 1;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.subtasks-add-input:focus {
+  border-color: var(--accent, #5b6cff);
+}
+.subtasks-add-submit {
+  padding: 6px 10px;
+  font-size: 12px;
+}

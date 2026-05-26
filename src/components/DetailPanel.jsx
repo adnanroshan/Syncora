@@ -303,6 +303,14 @@ export function DetailPanel({
 
                 <DescriptionBlock task={task} onSave={(v) => patch('description', v)} />
 
+                {!isDraft && (
+                  <SubtasksBlock
+                    parent={task}
+                    api={api}
+                    onOpen={onNavigate}
+                  />
+                )}
+
                 {!isDraft && <Audit task={task} assignee={assignee}/>}
               </>
             ) : null}
@@ -483,6 +491,125 @@ export function DetailPanel({
 }
 
 /* ---------- description block (click to edit, autosave on blur) ---------- */
+function SubtasksBlock({ parent, api, onOpen }) {
+  const [subtasks, setSubtasks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    if (parent?.taskid == null) return;
+    setLoading(true);
+    try { setSubtasks(await api.listSubtasks(parent.taskid)); }
+    catch { /* ignore */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (parent?.taskid == null) { setSubtasks([]); return; }
+      setLoading(true);
+      try {
+        const rows = await api.listSubtasks(parent.taskid);
+        if (!cancelled) setSubtasks(rows);
+      } catch { /* ignore */ }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [parent?.taskid, api]);
+
+  const onAdd = async () => {
+    const title = draft.trim();
+    if (!title) return;
+    setBusy(true);
+    try {
+      await api.createTask({
+        title,
+        parenttaskid:   parent.taskid,
+        organisationid: parent.organisationid,
+        productid:      parent.productid,
+        moduleid:       parent.moduleid,
+        taskgroupid:    parent.taskgroupid,
+        status:         'todo',
+        priority:       parent.priority || 'medium',
+      });
+      setDraft('');
+      setAdding(false);
+      await refresh();
+    } catch (err) {
+      alert('Could not add subtask: ' + (err?.errors?.[0]?.message || err?.message || String(err)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="subtasks">
+      <div className="subtasks-head">
+        <span className="subtasks-label">
+          Subtasks{subtasks.length ? ` · ${subtasks.length}` : ''}
+        </span>
+        {!adding && (
+          <button className="subtasks-add-btn" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={12}/><span>Add subtask</span>
+          </button>
+        )}
+      </div>
+
+      <ul className="subtasks-list">
+        {subtasks.map(st => (
+          <li
+            key={st.taskid}
+            className="subtasks-item"
+            onClick={() => onOpen?.(st.taskid)}
+          >
+            <StatusGlyph status={normaliseStatus(st.status)} size={13}/>
+            <span className="subtasks-item-title">{st.title || '(untitled)'}</span>
+            <span className="subtasks-item-id">#{st.taskid}</span>
+          </li>
+        ))}
+        {!subtasks.length && !loading && !adding && (
+          <li className="subtasks-empty">No subtasks yet.</li>
+        )}
+      </ul>
+
+      {adding && (
+        <div className="subtasks-add">
+          <input
+            className="subtasks-add-input"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="New subtask title"
+            disabled={busy}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); onAdd(); }
+              if (e.key === 'Escape') { setDraft(''); setAdding(false); }
+            }}
+          />
+          <button
+            className="btn-primary subtasks-add-submit"
+            onClick={onAdd}
+            disabled={busy || !draft.trim()}
+          >
+            {busy ? 'Adding…' : 'Add'}
+          </button>
+          <button
+            className="iconbtn"
+            onClick={() => { setDraft(''); setAdding(false); }}
+            aria-label="Cancel"
+            title="Cancel"
+          >
+            <Icon name="close" size={14}/>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DescriptionBlock({ task, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.description || '');

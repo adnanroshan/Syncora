@@ -2130,95 +2130,190 @@ kbd {
   background: rgba(210, 63, 63, 0.08);
 }
 
-/* Detail-panel Subtasks block */
+/* Subtasks ------------------------------------------------------------- */
+.subt-progress {
+  display: flex; align-items: center; gap: 8px;
+}
+.subt-bar {
+  width: 60px; height: 4px;
+  background: var(--surface-hover);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.subt-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 180ms ease;
+}
+
 .subtasks {
-  margin-top: 20px;
-  padding-top: 12px;
-  border-top: 0.5px solid var(--border);
-}
-.subtasks-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-.subtasks-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-}
-.subtasks-add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text-soft, var(--text-faint));
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.subtasks-add-btn:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
-  color: var(--text);
-}
-.subtasks-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex; flex-direction: column;
 }
-.subtasks-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
+.subtasks li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px;
+  font-size: 13px;
+  border-radius: 5px;
+  position: relative;
+  transition: background 100ms;
+}
+.subtasks li:hover { background: var(--surface-hover); }
+
+.subtask-check {
+  width: 14px; height: 14px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 0.5px dashed var(--border-strong);
+  border-radius: 3px;
+  display: inline-grid; place-items: center;
+  color: white;
   cursor: pointer;
-  font-size: 13px;
+  padding: 0;
+  transition: background 120ms, border-color 120ms, border-style 120ms;
 }
-.subtasks-item:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+.subtask-check:hover { border-color: var(--text-muted); }
+.subtasks li.is-done .subtask-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
 }
-.subtasks-item-title {
-  flex: 1;
+.subtask-check > svg { display: block; }
+
+.subtask-title {
+  flex: 1; min-width: 0;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  cursor: text;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.subtasks-item-id {
-  font-size: 11px;
+.subtasks li.is-done .subtask-title {
   color: var(--text-faint);
+  text-decoration: line-through;
 }
-.subtasks-empty {
-  padding: 6px 8px;
-  font-size: 12px;
-  color: var(--text-faint);
-  list-style: none;
-}
-.subtasks-add {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-}
-.subtasks-add-input {
-  flex: 1;
-  padding: 6px 8px;
+
+.subtask-input {
+  flex: 1; min-width: 0;
   font: inherit;
-  font-size: 13px;
-  color: var(--text);
-  background: var(--surface, #fff);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: transparent;
+  border: none;
   outline: none;
+  color: var(--text);
+  padding: 0;
 }
-.subtasks-add-input:focus {
-  border-color: var(--accent, #5b6cff);
+
+.subtask-del {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  padding: 3px;
+  border-radius: 4px;
+  display: inline-grid; place-items: center;
+  opacity: 0;
+  transition: opacity 100ms, background 100ms, color 100ms;
+  cursor: pointer;
 }
-.subtasks-add-submit {
-  padding: 6px 10px;
-  font-size: 12px;
+.subtasks li:hover .subtask-del { opacity: 1; }
+.subtask-del:hover { background: var(--danger-bg); color: var(--danger); }
+
+.subtask-addbtn {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 6px;
+  background: transparent;
+  border: none;
+  border-top: 0.5px dashed var(--border-strong);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  text-align: left;
+  border-radius: 0 0 5px 5px;
+  transition: color 100ms, background 100ms;
+  cursor: pointer;
+}
+.subtask-addbtn:hover { color: var(--text); background: var(--surface-hover); }
+.subtask-addbtn > svg { flex-shrink: 0; }
+
+.subtask-addrow {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 6px;
+  margin-top: 2px;
+  border-top: 0.5px dashed var(--border-strong);
+  background: var(--bg-elev);
+  border-radius: 0 0 5px 5px;
+}
+.subtask-addrow .subtask-check { opacity: 0.5; cursor: default; }
+.subtask-addrow .subtask-hint {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  flex-shrink: 0;
+}
+
+/* Per-subtask assignee picker */
+.subt-assg { position: relative; flex-shrink: 0; }
+.subt-assg-trigger {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-grid; place-items: center;
+  border-radius: 50%;
+  transition: opacity 100ms, transform 100ms;
+}
+.subt-assg-trigger.is-empty { opacity: 0.5; }
+.subtasks li:hover .subt-assg-trigger.is-empty { opacity: 1; }
+.subt-assg-trigger:hover { transform: scale(1.06); }
+
+.subt-assg-empty-avatar {
+  display: inline-grid; place-items: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--surface-hover);
+  border: 0.5px dashed var(--border-strong);
+  color: var(--text-faint);
+}
+
+.subt-assg-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 6;
+  min-width: 220px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-pop);
+  padding: 4px;
+  display: flex; flex-direction: column;
+}
+.subt-assg-popitem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 7px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.subt-assg-popitem:hover { background: var(--surface-hover); }
+.subt-assg-popitem.is-current { background: var(--accent-bg); color: var(--accent); }
+.subt-assg-popitem-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-left: auto;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.subt-assg-empty {
+  padding: 10px 8px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  text-align: center;
 }

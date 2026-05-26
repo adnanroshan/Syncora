@@ -90,6 +90,41 @@ export async function listUserProductsModules(userid) {
   return r?.collection || [];
 }
 
+export async function listOrgAccessRows(organisationid) {
+  if (organisationid == null) return [];
+  const r = await restful({ url: `~/v2/userorgs?organisationid=${encodeURIComponent(organisationid)}` });
+  return r?.collection || [];
+}
+
+export async function listProductAccessRows(productid) {
+  if (productid == null) return [];
+  const r = await restful({ url: `~/v2/userproductsmodules?productid=${encodeURIComponent(productid)}` });
+  return r?.collection || [];
+}
+
+export async function listAssignees(taskid) {
+  if (taskid == null) return [];
+  const r = await restful({ url: `~/v2/taskassignees?taskid=${encodeURIComponent(taskid)}` });
+  return r?.collection || [];
+}
+
+export async function addAssignee({ taskid, assigneduserid, isprimary = false }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskassignees',
+    body: { taskid, assigneduserid, isprimary },
+  });
+}
+
+export async function setPrimaryAssignee(taskid, assigneduserid) {
+  const key = `${encodeURIComponent(taskid)},${encodeURIComponent(assigneduserid)}`;
+  return restful({
+    method: 'PATCH',
+    url: `~/v2/taskassignees/${key}`,
+    body: { isprimary: true },
+  });
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */

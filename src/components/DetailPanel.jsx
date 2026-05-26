@@ -399,6 +399,19 @@ export function DetailPanel({
                 />
               </SideField>
 
+              <SideField label="Assignees">
+                <AssigneesField
+                  taskId={isDraft ? null : task.taskid}
+                  organisationid={task.organisationid}
+                  productid={task.productid}
+                  moduleid={task.moduleid}
+                  users={lookups?.users || []}
+                  usersById={usersById}
+                  api={api}
+                  disabled={isDraft}
+                />
+              </SideField>
+
               {!isDraft && (
                 <div className="side-meta">
                   <div>Created {fmtFullDate(task.creationdate)}</div>

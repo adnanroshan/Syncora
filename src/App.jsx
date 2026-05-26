@@ -191,7 +191,7 @@ export default function App({ user, hypermedia, isMock }) {
 
   /* ------- filters + search ------- */
   const filteredTasks = useMemo(() => {
-    let arr = scopedTasks;
+    let arr = scopedTasks.filter(t => t.parenttaskid == null);
     if (filters.status)   arr = arr.filter(t => normaliseStatus(t.status) === filters.status);
     if (filters.priority) arr = arr.filter(t => t.priority === filters.priority);
     if (filters.assignee != null) arr = arr.filter(t => t.createdbyuserid === filters.assignee);

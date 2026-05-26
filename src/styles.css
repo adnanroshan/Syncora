@@ -2092,3 +2092,40 @@ kbd {
   color: var(--text-faint);
   border-top: 0.5px solid var(--border);
 }
+
+/* Detail-panel More menu */
+.detail-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+  padding: 4px;
+  z-index: 50;
+}
+.detail-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text, #1f2328);
+  text-align: left;
+  cursor: pointer;
+}
+.detail-menu-item:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+.detail-menu-item-danger {
+  color: #d23f3f;
+}
+.detail-menu-item-danger:hover {
+  background: rgba(210, 63, 63, 0.08);
+}

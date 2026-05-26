@@ -28,6 +28,7 @@ export function DetailPanel({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [openPicker, setOpenPicker] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   /* In draft mode, mirror the parent's draftTask into local `task`. */
   useEffect(() => {
@@ -51,6 +52,21 @@ export function DetailPanel({
       .finally(() => { if (!cancelled) setLoad(false); });
     return () => { cancelled = true; };
   }, [taskId, api, isDraft]);
+
+  /* Close the More menu on outside click / Escape. */
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e) => {
+      if (!e.target.closest('.detail-menu-wrap')) setMenuOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
 
   const siblings = allTasks || [];
   const idx  = task && !isDraft ? siblings.findIndex(t => t.taskid === task.taskid) : -1;
@@ -173,7 +189,14 @@ export function DetailPanel({
       <aside className="detail" role="dialog" aria-label={task?.title || (isDraft ? 'New task' : 'Task')}>
         <header className="detail-head">
           <div className="detail-head-left">
-            <button className="iconbtn" onClick={handleClose} aria-label="Close"><Icon name="close" size={16}/></button>
+            <button
+              className="iconbtn"
+              onClick={handleClose}
+              aria-label="Close panel"
+              title="Close panel"
+            >
+              <Icon name="close" size={16}/>
+            </button>
             <span className="detail-id">{isDraft ? 'New' : `#${taskId}`}</span>
             <span className="detail-crumb">
               {task?.organisationname || '—'} <Icon name="chevron-r" size={11}/> {task?.productname || '—'}
@@ -181,27 +204,60 @@ export function DetailPanel({
           </div>
           <div className="detail-head-right">
             {isDraft ? (
-              <>
-                <button
-                  className="btn-primary"
-                  onClick={onCreateClick}
-                  disabled={creating || !task?.title?.trim() || !canCreate}
-                  title={!canCreate ? "You don't have permission to create tasks" : undefined}
-                >
-                  <Icon name="plus" size={13}/>
-                  <span>{creating ? 'Creating…' : 'Create'}</span>
-                </button>
-                <button className="iconbtn" onClick={handleClose} aria-label="Discard">
-                  <Icon name="close" size={15}/>
-                </button>
-              </>
+              <button
+                className="btn-primary"
+                onClick={onCreateClick}
+                disabled={creating || !task?.title?.trim() || !canCreate}
+                title={!canCreate ? "You don't have permission to create tasks" : 'Create task'}
+              >
+                <Icon name="plus" size={13}/>
+                <span>{creating ? 'Creating…' : 'Create'}</span>
+              </button>
             ) : (
               <>
-                <button className="iconbtn" onClick={() => prev && onNavigate(prev.taskid)} disabled={!prev} aria-label="Previous"><Icon name="chevron-l" size={15}/></button>
-                <button className="iconbtn" onClick={() => next && onNavigate(next.taskid)} disabled={!next} aria-label="Next"><Icon name="chevron-r" size={15}/></button>
+                <button
+                  className="iconbtn"
+                  onClick={() => prev && onNavigate(prev.taskid)}
+                  disabled={!prev}
+                  aria-label="Previous task"
+                  title="Previous task"
+                >
+                  <Icon name="chevron-l" size={15}/>
+                </button>
+                <button
+                  className="iconbtn"
+                  onClick={() => next && onNavigate(next.taskid)}
+                  disabled={!next}
+                  aria-label="Next task"
+                  title="Next task"
+                >
+                  <Icon name="chevron-r" size={15}/>
+                </button>
                 <span className="detail-divider"/>
-                <button className="iconbtn" onClick={onDelete} aria-label="Delete"><Icon name="close" size={15}/></button>
-                <button className="iconbtn" aria-label="More"><Icon name="more" size={15}/></button>
+                <div className="detail-menu-wrap" style={{ position: 'relative' }}>
+                  <button
+                    className="iconbtn"
+                    onClick={() => setMenuOpen(v => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    aria-label="More actions"
+                    title="More actions"
+                  >
+                    <Icon name="more" size={15}/>
+                  </button>
+                  {menuOpen && (
+                    <div className="detail-menu" role="menu">
+                      <button
+                        className="detail-menu-item detail-menu-item-danger"
+                        role="menuitem"
+                        onClick={() => { setMenuOpen(false); onDelete(); }}
+                      >
+                        <Icon name="trash" size={14}/>
+                        <span>Delete task</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>

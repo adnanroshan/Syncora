@@ -72,6 +72,24 @@ export async function removeAssignee(taskid, assigneduserid) {
   });
 }
 
+export async function findUserByUsername(username) {
+  if (!username) return null;
+  const r = await restful({ url: `~/v2/users?filter=(username='${encodeURIComponent(username)}')` });
+  return r?.collection?.[0] || null;
+}
+
+export async function listUserOrgs(userid) {
+  if (userid == null) return [];
+  const r = await restful({ url: `~/v2/userorgs?userid=${encodeURIComponent(userid)}` });
+  return r?.collection || [];
+}
+
+export async function listUserProductsModules(userid) {
+  if (userid == null) return [];
+  const r = await restful({ url: `~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}` });
+  return r?.collection || [];
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */

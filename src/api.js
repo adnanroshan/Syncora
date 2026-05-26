@@ -64,6 +64,14 @@ export async function deleteTask(task) {
   return restful({ method: 'DELETE', url });
 }
 
+export async function removeAssignee(taskid, assigneduserid) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskassignees/ra',
+    body: { parameters: { taskid, assigneduserid } },
+  });
+}
+
 /* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
@@ -151,6 +159,19 @@ function handleMock({ method = 'GET', url, body } = {}) {
     const id = parseInt(path.split('/').pop(), 10);
     MOCK.tasks = MOCK.tasks.filter(x => x.taskid !== id);
     return {};
+  }
+  if (method === 'POST' && path === '/v2/taskassignees/ra') {
+    const id = body?.parameters?.taskid;
+    const i  = MOCK.tasks.findIndex(x => x.taskid === id);
+    if (i < 0) throw mkError(404, 'not_found', 'Task not found');
+    const merged = decorateTask({
+      ...MOCK.tasks[i],
+      usersusername: null,
+      assignee: null,
+      lastmodifieddate: new Date().toISOString(),
+    });
+    MOCK.tasks[i] = merged;
+    return withLinks(merged);
   }
 
   if (method === 'GET' && path === '/v2/organisation') return { collection: MOCK.orgs };

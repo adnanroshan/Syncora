@@ -53,6 +53,22 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
     }
   };
 
+  const removeAssignee = async () => {
+    if (!task) return;
+    const assigneduserid = task.assignee?.id ?? task.assignee?.usersid ?? task.assigneduserid;
+    if (!assigneduserid) return;
+    const previous = task;
+    setTask({ ...task, assignee: null, usersusername: null });
+    try {
+      const saved = await api.removeAssignee(task.taskid, assigneduserid);
+      setTask(prev => ({ ...prev, ...saved, assignee: null, usersusername: null }));
+      onAfterPatch?.({ ...previous, ...saved, assignee: null, usersusername: null });
+    } catch (err) {
+      setTask(previous);
+      alert('Could not remove assignee: ' + prettyErr(err));
+    }
+  };
+
   const onSaveTitle = () => {
     setEditingTitle(false);
     if (titleDraft !== task?.title) patch('title', titleDraft);
@@ -195,7 +211,11 @@ export function DetailPanel({ taskId, onClose, onNavigate, allTasks, lookups, ap
                     </>
                   }
                   options={[{ value: '', label: 'Unassigned' }, ...(lookups?.users || []).map(u => ({ value: u.username, label: u.username }))]}
-                  onPick={(v) => { patch('usersusername', v || null); setOpenPicker(null); }}
+                  onPick={(v) => {
+                    setOpenPicker(null);
+                    if (!v) removeAssignee();
+                    else patch('usersusername', v);
+                  }}
                   render={(opt) => <><Avatar name={opt.value || '·'} size={16}/><span>{opt.label}</span></>}
                 />
               </SideField>

@@ -153,7 +153,7 @@ export async function listMyUnread(userid) {
 
 export async function listActivity(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&order=creationdate%20desc&limit=100` });
+  const r = await restful({ url: `~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate%20desc&limit=100` });
   return r?.collection || [];
 }
 

@@ -159,7 +159,7 @@ export async function listActivity(taskid) {
 
 export async function listMessages(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&order=creationdate&limit=50` });
+  const r = await restful({ url: `~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate&limit=50` });
   return r?.collection || [];
 }
 

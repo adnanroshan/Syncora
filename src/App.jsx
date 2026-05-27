@@ -206,11 +206,12 @@ export default function App({ user, hypermedia, isMock }) {
   );
 
   /* Refresh per-task unread counts (called on app load + when the detail
-   * panel closes so badges clear for a task you just read). */
+   * panel closes so badges clear for a task you just read). Backend scopes
+   * to the logged-in user from auth context — no userid in the URL. */
   const refreshUnread = useCallback(async () => {
     if (me?.userid == null) { setUnreadRows([]); return; }
     try {
-      const rows = await api.listMyUnread(me.userid);
+      const rows = await api.listMyUnread();
       setUnreadRows(rows || []);
     } catch { /* swallow */ }
   }, [me?.userid]);

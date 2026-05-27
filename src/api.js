@@ -139,10 +139,9 @@ export async function listAllAssignees() {
   } catch { return []; }
 }
 
-export async function listMyUnread(userid) {
-  if (userid == null) return [];
+export async function listMyUnread() {
   try {
-    const r = await restful({ url: `~/v2/taskunread?userid=${encodeURIComponent(userid)}` });
+    const r = await restful({ url: '~/v2/taskunread' });
     return r?.collection || [];
   } catch { return []; }
 }
@@ -580,12 +579,13 @@ function handleMock({ method = 'GET', url, body } = {}) {
     return row;
   }
 
-  /* ---------- Per-user per-task unread counts (synthesized in mock) ---------- */
+  /* ---------- Per-user per-task unread counts (synthesized in mock) ----------
+   * Real backend derives the userid from auth context. In mock we fall back
+   * to the SEED "me" user (userid 8) — the same one App.jsx hardcodes when
+   * IS_MOCK is true. */
   if (method === 'GET' && path === '/v2/taskunread') {
-    const q = decodeURIComponent(String(url).split('?')[1] || '');
-    const u = q.match(/userid=(\d+)/);
-    if (!u) return { collection: [] };
-    const userid = parseInt(u[1], 10);
+    const meUser = MOCK.users.find(u => u.isMe) || MOCK.users.find(u => u.username === 'me');
+    const userid = meUser?.userid ?? meUser?.id ?? 8;
     const reads = new Map(
       MOCK.taskMessageReads
         .filter(r => r.userid === userid)

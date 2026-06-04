@@ -52,3 +52,28 @@ export function usePreferences() {
   };
   return [prefs, setPrefs];
 }
+
+/* ------------------------------------------------------------------ *
+ * usePref — a single localStorage-backed value, namespaced under its
+ * own key. Used for lightweight UI prefs that persist across reloads
+ * but don't belong in the theme/density bundle (e.g. attachmentsView).
+ * ------------------------------------------------------------------ */
+export function usePref(key, defaultValue) {
+  const storageKey = `syncora.pref.${key}`;
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      return raw == null ? defaultValue : JSON.parse(raw);
+    } catch { return defaultValue; }
+  });
+
+  const set = (next) => {
+    setValue(prev => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      try { localStorage.setItem(storageKey, JSON.stringify(resolved)); } catch {}
+      return resolved;
+    });
+  };
+
+  return [value, set];
+}

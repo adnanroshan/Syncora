@@ -5,11 +5,16 @@
  *  - ⌘↵ / Ctrl+↵ to send (also Send button)
  *  - autoresize up to 220px
  *  - `compact` mode drops the avatar slot (used inside edit-in-place)
+ *  - `enableAttachments` (top-level only): paperclip/image staging strip,
+ *    paste-to-attach, drop-onto-composer, and send-gating while sending.
+ *    Files upload AFTER the message is created (they need its messageid),
+ *    so staging here just collects File objects to hand to `onSend`.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icons.jsx';
 import { Avatar } from './Shared.jsx';
+import { classify, fmtBytes, hueForName } from '../attachments.js';
 
 function useMentionTypeahead(value, caret, candidates) {
   const upToCaret = value.slice(0, caret);
@@ -29,12 +34,15 @@ function useMentionTypeahead(value, caret, candidates) {
   return { open: matches.length > 0, query, start, end, matches };
 }
 
+let _stageSeq = 0;
+
 export function MessageComposer({
   currentUser,
   mentionCandidates = [],
   placeholder = 'Write a message… use @ to mention',
   autoFocus = false,
   compact = false,
+  enableAttachments = false,
   onSend,
   onCancel,
   initialValue = '',
@@ -42,7 +50,12 @@ export function MessageComposer({
   const [value, setValue]         = useState(initialValue);
   const [caret, setCaret]         = useState(initialValue.length);
   const [highlight, setHighlight] = useState(0);
+  const [staged, setStaged]       = useState([]); // { id, file }
+  const [dragging, setDragging]   = useState(false);
+  const [sending, setSending]     = useState(false);
   const textareaRef = useRef(null);
+  const fileRef = useRef(null);
+  const imgRef  = useRef(null);
 
   const ta = useMentionTypeahead(value, caret, mentionCandidates);
   useEffect(() => { setHighlight(0); }, [ta.query, ta.open]);
@@ -72,13 +85,48 @@ export function MessageComposer({
     });
   };
 
-  const submit = () => {
+  /* ---- staging ---- */
+  const addFiles = (files) => {
+    const items = [...files].map(f => ({ id: ++_stageSeq, file: f }));
+    if (items.length) setStaged(prev => [...prev, ...items]);
+  };
+  const removeStaged = (id) => setStaged(prev => prev.filter(s => s.id !== id));
+
+  const onPaste = (e) => {
+    if (!enableAttachments) return;
+    const imgs = [...(e.clipboardData?.items || [])]
+      .filter(i => i.kind === 'file' && i.type.startsWith('image/'))
+      .map(i => i.getAsFile())
+      .filter(Boolean);
+    if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+  };
+  const onDrop = (e) => {
+    if (!enableAttachments) return;
+    e.preventDefault();
+    setDragging(false);
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length) addFiles(files);
+  };
+
+  const submit = async () => {
+    if (sending) return;
     const t = value.trim();
-    if (!t) return;
-    onSend?.(t);
-    setValue('');
-    setCaret(0);
-    requestAnimationFrame(grow);
+    const files = staged.map(s => s.file);
+    if (!t && files.length === 0) return;
+    if (enableAttachments && files.length) {
+      setSending(true);
+      try {
+        await onSend?.(t, files);
+        setValue(''); setCaret(0); setStaged([]);
+      } finally {
+        setSending(false);
+        requestAnimationFrame(grow);
+      }
+    } else {
+      onSend?.(t, files);
+      setValue(''); setCaret(0); setStaged([]);
+      requestAnimationFrame(grow);
+    }
   };
 
   const onKeyDown = (e) => {
@@ -109,8 +157,16 @@ export function MessageComposer({
     if (autoFocus) requestAnimationFrame(() => textareaRef.current?.focus());
   }, [autoFocus]);
 
+  const sendDisabled = sending || (!value.trim() && staged.length === 0);
+
   return (
-    <div className={`chat-composer ${compact ? 'is-compact' : ''}`}>
+    <div
+      className={`chat-composer ${compact ? 'is-compact' : ''} ${dragging ? 'is-dragging' : ''}`}
+      onDragEnter={enableAttachments ? (e) => { e.preventDefault(); setDragging(true); } : undefined}
+      onDragOver={enableAttachments ? (e) => e.preventDefault() : undefined}
+      onDragLeave={enableAttachments ? () => setDragging(false) : undefined}
+      onDrop={enableAttachments ? onDrop : undefined}
+    >
       {!compact && <Avatar user={currentUser} name={currentUser?.username} size={26}/>}
       <div className="chat-composer-main">
         <div className="chat-composer-input-wrap">
@@ -120,6 +176,7 @@ export function MessageComposer({
             onChange={onChange}
             onSelect={onSelect}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             placeholder={placeholder}
             rows={1}
             spellCheck="true"
@@ -144,6 +201,33 @@ export function MessageComposer({
             </div>
           )}
         </div>
+
+        {enableAttachments && staged.length > 0 && (
+          <div className="stage-strip">
+            {staged.map(s => {
+              const { isImage, extClass, label } = classify(s.file.name, s.file.type);
+              return (
+                <div key={s.id} className="stage-item">
+                  <span
+                    className={`stage-thumb ${isImage ? '' : 'att-ext--' + extClass}`}
+                    style={isImage ? { '--thumb-hue': hueForName(s.file.name) } : null}
+                  >
+                    {isImage ? <span className="att-thumb" style={{ position: 'absolute', inset: 0 }}/> : label.slice(0, 3)}
+                  </span>
+                  <span className="stage-main">
+                    <span className="stage-name" title={s.file.name}>{s.file.name}</span>
+                    <span className="stage-size">{fmtBytes(s.file.size)}</span>
+                  </span>
+                  {!sending && (
+                    <span className="stage-x" title="Remove" onClick={() => removeStaged(s.id)}><Icon name="close" size={9}/></span>
+                  )}
+                  {sending && <span className="stage-prog"><span className="stage-prog-fill stage-prog-indeterminate"/></span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="chat-composer-bar">
           <button
             type="button"
@@ -168,8 +252,18 @@ export function MessageComposer({
               });
             }}
           ><Icon name="at" size={13}/></button>
-          <button type="button" className="chat-tool" title="Attach file"><Icon name="paperclip" size={13}/></button>
-          <button type="button" className="chat-tool" title="Insert image"><Icon name="image" size={13}/></button>
+          <button
+            type="button"
+            className={`chat-tool ${enableAttachments && staged.length ? 'is-armed' : ''}`}
+            title="Attach file"
+            onClick={enableAttachments ? () => fileRef.current?.click() : undefined}
+          ><Icon name="paperclip" size={13}/></button>
+          <button
+            type="button"
+            className="chat-tool"
+            title="Attach image"
+            onClick={enableAttachments ? () => imgRef.current?.click() : undefined}
+          ><Icon name="image" size={13}/></button>
           <button type="button" className="chat-tool" title="Add emoji"><Icon name="smile" size={13}/></button>
           <span className="spacer"/>
           {onCancel && (
@@ -180,11 +274,20 @@ export function MessageComposer({
             type="button"
             className="chat-send"
             onClick={submit}
-            disabled={!value.trim()}
+            disabled={sendDisabled}
           >
             <Icon name="send" size={11}/>
-            Send
+            {sending ? 'Sending…' : 'Send'}
           </button>
+
+          {enableAttachments && (
+            <>
+              <input ref={fileRef} type="file" multiple className="sr-only"
+                onChange={(e) => { const f = [...(e.target.files || [])]; if (f.length) addFiles(f); e.target.value = ''; }}/>
+              <input ref={imgRef} type="file" accept="image/*" multiple className="sr-only"
+                onChange={(e) => { const f = [...(e.target.files || [])]; if (f.length) addFiles(f); e.target.value = ''; }}/>
+            </>
+          )}
         </div>
       </div>
     </div>

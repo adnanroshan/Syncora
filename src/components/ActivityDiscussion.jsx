@@ -3,7 +3,7 @@
  * down to <Discussion>, and the read-marker / unread badge.
  */
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Icon } from './Icons.jsx';
 import { ActivityFeed } from './ActivityFeed.jsx';
 import { Discussion } from './Discussion.jsx';
@@ -16,11 +16,15 @@ function prettyErr(err) {
   return err.message || String(err);
 }
 
-export function ActivityDiscussion({ task, currentUser, usersById, lookups, api }) {
+export function ActivityDiscussion({
+  task, currentUser, usersById, lookups, api,
+  attachments = [], onOpenImage, resolver, onAttachFiles, jumpRequest,
+}) {
   const taskId = task?.taskid;
   const meId   = currentUser?.userid;
 
   const [tab, setTab]               = useState('discussion');
+  const messageRefs = useRef({});
   const [activity, setActivity]     = useState([]);
   const [messages, setMessages]     = useState([]);
   const [reactions, setReactions]   = useState([]);
@@ -73,8 +77,19 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
     return out;
   }, [usersById]);
 
+  /* Group message-level attachments by messageid for inline rendering.
+   * Failed optimistic rows are hidden from the thread. */
+  const attachmentsByMessage = useMemo(() => {
+    const out = {};
+    for (const a of attachments) {
+      if (a.messageid == null || a.status === 'failed') continue;
+      (out[a.messageid] ||= []).push(a);
+    }
+    return out;
+  }, [attachments]);
+
   /* --- Mutations (optimistic) --- */
-  const sendMessage = async ({ text, parentmessageid }) => {
+  const sendMessage = async ({ text, parentmessageid, files }) => {
     if (!taskId || !meId) return;
     const optimisticId = -Date.now();
     const optimistic = {
@@ -96,6 +111,11 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
         taskid: taskId, userid: meId, parentmessageid: parentmessageid ?? null, messagetext: text,
       });
       setMessages(prev => prev.map(m => m.messageid === optimisticId ? saved : m));
+
+      /* Now that the message exists, upload any staged files against it. */
+      if (files?.length && onAttachFiles) {
+        await onAttachFiles(files, saved.messageid);
+      }
 
       /* Best-effort mention extraction + POST. */
       const tokens = Array.from(new Set((text.match(MENTION_RE) || []).map(s => s.slice(1))));
@@ -181,6 +201,21 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
     return () => clearTimeout(id);
   }, [tab, messages.length, markAllRead]);
 
+  /* Jump to a message (from a "from message" attachment badge): switch to
+   * the Discussion tab, then scroll the target into view with a brief flash. */
+  useEffect(() => {
+    if (jumpRequest?.messageid == null) return;
+    setTab('discussion');
+    const id = setTimeout(() => {
+      const el = messageRefs.current[jumpRequest.messageid];
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('chat-msg-flash');
+      setTimeout(() => el.classList.remove('chat-msg-flash'), 1600);
+    }, 120);
+    return () => clearTimeout(id);
+  }, [jumpRequest]);
+
   const taskAssigneeUsers = useMemo(
     () => taskAssignees
       .map(a => usersById?.[a.assigneduserid])
@@ -243,6 +278,10 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
           onSoftDelete={softDeleteMessage}
           onToggleReaction={toggleReaction}
           onMarkRead={markAllRead}
+          attachmentsByMessage={attachmentsByMessage}
+          onOpenImage={onOpenImage}
+          resolver={resolver}
+          messageRefs={messageRefs}
         />
       )}
     </section>

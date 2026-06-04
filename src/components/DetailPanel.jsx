@@ -17,6 +17,18 @@ import { DueDatePicker } from './DueDatePicker.jsx';
 import { AssigneesField } from './AssigneesField.jsx';
 import { Subtasks } from './Subtasks.jsx';
 import { ActivityDiscussion } from './ActivityDiscussion.jsx';
+import { TaskAttachments } from './TaskAttachments.jsx';
+import { Lightbox } from './Lightbox.jsx';
+import { usePref } from '../preferences.js';
+import { classify, downloadAttachment } from '../attachments.js';
+
+function genUuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 export function DetailPanel({
   taskId, draftTask, creating,
@@ -31,6 +43,97 @@ export function DetailPanel({
   const [titleDraft, setTitleDraft] = useState('');
   const [openPicker, setOpenPicker] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  /* ---- attachments ---- */
+  const [attachments, setAttachments] = useState([]);
+  const [lightbox, setLightbox] = useState(null);          // { index } | null
+  const [attView, setAttView] = usePref('attachmentsView', 'grid');
+  const [jumpRequest, setJumpRequest] = useState(null);    // { messageid, nonce }
+  const resolver = api.fetchAttachmentBlobUrl;
+
+  /* Load task attachments whenever a saved task is shown. */
+  useEffect(() => {
+    if (isDraft || taskId == null) { setAttachments([]); return; }
+    let cancelled = false;
+    api.listAttachments(taskId)
+      .then(rows => { if (!cancelled) setAttachments(rows); })
+      .catch(() => { if (!cancelled) setAttachments([]); });
+    return () => { cancelled = true; };
+  }, [taskId, isDraft, api]);
+
+  /* All task images (task- AND message-sourced), oldest→newest, for the
+   * lightbox to walk as one list. Failed optimistic rows are excluded. */
+  const taskImages = useMemo(
+    () => attachments
+      .filter(a => a.status !== 'failed' && classify(a.filename, a.mimetype).isImage)
+      .sort((a, b) => new Date(a.creationdate) - new Date(b.creationdate)),
+    [attachments],
+  );
+
+  const openImage = (a) => {
+    const idx = taskImages.findIndex(x => x.attachmentid === a.attachmentid);
+    setLightbox({ index: Math.max(0, idx) });
+  };
+
+  /* Optimistic upload. One multipart POST per file; the optimistic card and
+   * the persisted row share a client-generated UUID, so no temp-id swap. */
+  const addFiles = async (files, messageid = null) => {
+    if (!task || isDraft) return;
+    const me = currentUser?.userid;
+    const tid = task.taskid;
+    const jobs = [...files].map((file) => {
+      const id = genUuid();
+      const optimistic = {
+        attachmentid: id, taskid: tid, messageid: messageid ?? null,
+        userid: me, username: currentUser?.username,
+        filename: file.name, filesize: file.size, mimetype: file.type,
+        url: file.type?.startsWith('image/') ? URL.createObjectURL(file) : null,
+        creationdate: new Date().toISOString(),
+        status: 'uploading', progress: 0, _file: file,
+      };
+      return { id, file, optimistic };
+    });
+    setAttachments(prev => [...prev, ...jobs.map(j => j.optimistic)]);
+
+    await Promise.all(jobs.map(async ({ id, file, optimistic }) => {
+      try {
+        const saved = await api.createAttachment({
+          taskid: tid, messageid: messageid ?? null, uploadedbyuserid: me,
+          file, attachmentid: id,
+          onProgress: (p) => setAttachments(prev => prev.map(a => a.attachmentid === id ? { ...a, progress: p } : a)),
+        });
+        setAttachments(prev => prev.map(a => a.attachmentid === id
+          ? { ...saved, url: optimistic.url || saved.url, status: 'done' }
+          : a));
+      } catch {
+        setAttachments(prev => prev.map(a => a.attachmentid === id ? { ...a, status: 'failed' } : a));
+      }
+    }));
+  };
+
+  const retryAtt = (a) => {
+    if (!a?._file) return;
+    setAttachments(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
+    addFiles([a._file], a.messageid ?? null);
+  };
+
+  const deleteAtt = async (a) => {
+    const before = attachments;
+    setAttachments(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
+    if (a.status === 'failed') return;        // never persisted — local removal only
+    try {
+      await api.deleteAttachment(a.attachmentid);
+    } catch (err) {
+      setAttachments(before);
+      alert('Could not delete attachment: ' + prettyErr(err));
+    }
+  };
+
+  const onDownload = (a) => downloadAttachment(a, resolver);
+  const onCopyLink = (a) => {
+    const href = api.attachmentHref(a);
+    if (href && navigator.clipboard) navigator.clipboard.writeText(href).catch(() => {});
+  };
 
   /* In draft mode, mirror the parent's draftTask into local `task`. */
   useEffect(() => {
@@ -314,12 +417,35 @@ export function DetailPanel({
                 />
 
                 {!isDraft && (
+                  <TaskAttachments
+                    atts={attachments}
+                    currentUser={currentUser}
+                    usersById={usersById}
+                    view={attView}
+                    setView={setAttView}
+                    onAdd={(files) => addFiles(files, null)}
+                    onDelete={deleteAtt}
+                    onRetry={retryAtt}
+                    onOpenImage={openImage}
+                    onJumpMessage={(mid) => setJumpRequest({ messageid: mid, nonce: Date.now() })}
+                    onDownload={onDownload}
+                    onCopyLink={onCopyLink}
+                    resolver={resolver}
+                  />
+                )}
+
+                {!isDraft && (
                   <ActivityDiscussion
                     task={task}
                     currentUser={currentUser}
                     usersById={usersById}
                     lookups={lookups}
                     api={api}
+                    attachments={attachments}
+                    onOpenImage={openImage}
+                    resolver={resolver}
+                    onAttachFiles={addFiles}
+                    jumpRequest={jumpRequest}
                   />
                 )}
               </>
@@ -496,6 +622,17 @@ export function DetailPanel({
           )}
         </div>
       </aside>
+
+      {lightbox && taskImages.length > 0 && (
+        <Lightbox
+          images={taskImages}
+          index={Math.min(lightbox.index, taskImages.length - 1)}
+          onClose={() => setLightbox(null)}
+          onIndex={(i) => setLightbox({ index: i })}
+          resolver={resolver}
+          usersById={usersById}
+        />
+      )}
     </>
   );
 }

@@ -10,6 +10,7 @@ import React, {
 import { Icon } from './Icons.jsx';
 import { Avatar } from './Shared.jsx';
 import { MessageComposer } from './MessageComposer.jsx';
+import { MessageAttachments } from './MessageAttachments.jsx';
 
 const QUICK_EMOJI = ['👍', '🎉', '❤️'];
 const EMOJI_PICKER_SET = [
@@ -161,6 +162,7 @@ function Reactions({ reactions, currentUserId, onToggle, usersById }) {
 function Message({
   message, currentUser, usersById, usersByUsername, mentionCandidates,
   reactions, onReply, onEdit, onDelete, onToggleReaction, isReply = false,
+  atts = [], onOpenImage, resolver, messageRefs,
 }) {
   const author = usersById[message.userid] || { username: message.userUsername, name: message.userUsername };
   const isMine = currentUser?.userid === message.userid;
@@ -222,7 +224,10 @@ function Message({
   }
 
   return (
-    <div className={`chat-msg ${isReply ? 'is-reply' : ''}`}>
+    <div
+      className={`chat-msg ${isReply ? 'is-reply' : ''}`}
+      ref={(el) => { if (messageRefs) messageRefs.current[message.messageid] = el; }}
+    >
       <span className="chat-msg-avatar-slot">
         <Avatar user={author} name={author.username} size={28}/>
       </span>
@@ -237,6 +242,7 @@ function Message({
         <div className="chat-msg-text">
           {renderMessageText(message.messagetext, usersByUsername)}
         </div>
+        <MessageAttachments atts={atts} onOpenImage={onOpenImage} resolver={resolver}/>
         <Reactions
           reactions={reactions}
           currentUserId={currentUser?.userid}
@@ -294,6 +300,7 @@ function Message({
 export function Discussion({
   messages, reactions, lastReadMessageId, currentUser, usersById,
   taskAssignees = [], onSend, onEdit, onSoftDelete, onToggleReaction, onMarkRead,
+  attachmentsByMessage = {}, onOpenImage, resolver, messageRefs,
 }) {
   const usersByUsername = useMemo(() => {
     const out = {};
@@ -381,7 +388,8 @@ export function Discussion({
         <MessageComposer
           currentUser={currentUser}
           mentionCandidates={mentionCandidates}
-          onSend={(text) => onSend?.({ text, parentmessageid: null })}
+          enableAttachments
+          onSend={(text, files) => onSend?.({ text, parentmessageid: null, files })}
         />
       </div>
     );
@@ -419,6 +427,10 @@ export function Discussion({
         onEdit={onEdit}
         onDelete={onSoftDelete}
         onToggleReaction={onToggleReaction}
+        atts={attachmentsByMessage[m.messageid] || []}
+        onOpenImage={onOpenImage}
+        resolver={resolver}
+        messageRefs={messageRefs}
       />,
     );
 
@@ -438,6 +450,10 @@ export function Discussion({
               onEdit={onEdit}
               onDelete={onSoftDelete}
               onToggleReaction={onToggleReaction}
+              atts={attachmentsByMessage[r.messageid] || []}
+              onOpenImage={onOpenImage}
+              resolver={resolver}
+              messageRefs={messageRefs}
               isReply
             />
           ))}
@@ -469,7 +485,8 @@ export function Discussion({
       <MessageComposer
         currentUser={currentUser}
         mentionCandidates={mentionCandidates}
-        onSend={(text) => onSend?.({ text, parentmessageid: null })}
+        enableAttachments
+        onSend={(text, files) => onSend?.({ text, parentmessageid: null, files })}
       />
     </div>
   );

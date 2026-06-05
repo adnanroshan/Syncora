@@ -60,7 +60,7 @@ function UserMenu({ user, onLogout }) {
       {open && (
         <div className="usermenu-pop" role="menu">
           <div className="usermenu-head">
-            <div className="usermenu-name">{user.name || 'Signed in'}</div>
+            <div className="usermenu-name">{user.name || user.username || 'Signed in'}</div>
             {user.email && <div className="usermenu-email">{user.email}</div>}
           </div>
           <button className="usermenu-item" role="menuitem" onClick={() => { setOpen(false); onLogout(); }}>

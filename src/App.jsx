@@ -78,6 +78,7 @@ export default function App({ user, hypermedia, isMock }) {
     if (!user) return null;
     const candidates = [
       user?.raw?.preferred_username,
+      user?.raw?.unique_name,
       user?.email,
       user?.sub,
       user?.name,
@@ -88,13 +89,16 @@ export default function App({ user, hypermedia, isMock }) {
     });
     const username = matched?.username
       || user?.raw?.preferred_username
+      || user?.raw?.unique_name
       || user?.email
       || user?.sub
       || null;
     return {
       username,
       userid:   matched?.userid ?? meUserId ?? null,
-      name:     matched?.name || user.name,
+      // Prefer the real backend name, then the login username; only fall back
+      // to the id_token `name` claim (often a generic like "user") last.
+      name:     matched?.name || username || user.name,
       email:    user.email,
       picture:  user.picture,
       hue:      hashHue(username),

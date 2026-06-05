@@ -2980,6 +2980,17 @@ kbd {
    ATTACHMENTS — task-level section + message-level files
    ============================================================ */
 
+/* visually hide native file inputs — triggered by their visible buttons */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---- section head: count + view toggle + filter ---- */
 .att-head-tools { display: flex; align-items: center; gap: 8px; }
 .att-seg {

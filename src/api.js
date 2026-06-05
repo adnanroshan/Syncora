@@ -142,7 +142,13 @@ export async function listAllAssignees() {
 export async function listMyUnread() {
   try {
     const r = await restful({ url: '~/v2/taskunread' });
-    return r?.collection || [];
+    // Normalize field casing: the backend returns lowercase
+    // `unreadcount`/`mentioncount`; the UI reads camelCase.
+    return (r?.collection || []).map(row => ({
+      ...row,
+      unreadCount:  row.unreadCount  ?? row.unreadcount  ?? 0,
+      mentionCount: row.mentionCount ?? row.mentioncount ?? 0,
+    }));
   } catch { return []; }
 }
 

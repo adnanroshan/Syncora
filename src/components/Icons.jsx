@@ -63,6 +63,8 @@ export function Icon({ name, size = 16, className = '', style = {} }) {
     case 'alert':     return <svg {...common}><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>;
     case 'refresh':   return <svg {...common}><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>;
     case 'upload':    return <svg {...common}><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>;
+    case 'panel-side':   return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>;
+    case 'panel-center': return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="7" y="8" width="10" height="8" rx="1"/></svg>;
     case 'logo':      return (
       <svg width={size} height={size} viewBox="0 0 24 24" style={s} className={className}>
         <circle cx="9"  cy="12" r="6" fill="currentColor" opacity="0.55"/>

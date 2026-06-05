@@ -34,8 +34,10 @@ export function DetailPanel({
   taskId, draftTask, creating,
   onClose, onNavigate, onDiscardDraft, onCommitDraft,
   allTasks, lookups, usersById, currentUser, api, onAfterPatch, onAfterDelete,
+  mode = 'panel', onModeChange,
 }) {
   const isDraft = !!draftTask;
+  const isPopup = mode === 'popup';
   const [task, setTask]     = useState(null);
   const [loading, setLoad]  = useState(false);
   const [error, setError]   = useState(null);
@@ -173,6 +175,20 @@ export function DetailPanel({
     };
   }, [menuOpen]);
 
+  /* Esc closes the panel (both layouts) — but not while a menu is open,
+   * the lightbox is up, or the user is typing in a field. */
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (menuOpen || lightbox) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      handleClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen, lightbox, isDraft]);
+
   const siblings = allTasks || [];
   const idx  = task && !isDraft ? siblings.findIndex(t => t.taskid === task.taskid) : -1;
   const prev = idx > 0 ? siblings[idx - 1] : null;
@@ -290,8 +306,8 @@ export function DetailPanel({
 
   return (
     <>
-      <div className="detail-scrim" onClick={handleClose}/>
-      <aside className="detail" role="dialog" aria-label={task?.title || (isDraft ? 'New task' : 'Task')}>
+      <div className={`detail-scrim ${isPopup ? 'is-popup' : ''}`} onClick={handleClose}/>
+      <aside className={`detail ${isPopup ? 'is-popup' : ''}`} role="dialog" aria-label={task?.title || (isDraft ? 'New task' : 'Task')}>
         <header className="detail-head">
           <div className="detail-head-left">
             <button
@@ -309,15 +325,19 @@ export function DetailPanel({
           </div>
           <div className="detail-head-right">
             {isDraft ? (
-              <button
-                className="btn-primary"
-                onClick={onCreateClick}
-                disabled={creating || !task?.title?.trim() || !canCreate}
-                title={!canCreate ? "You don't have permission to create tasks" : 'Create task'}
-              >
-                <Icon name="plus" size={13}/>
-                <span>{creating ? 'Creating…' : 'Create'}</span>
-              </button>
+              <>
+                <LayoutToggle mode={mode} isPopup={isPopup} onModeChange={onModeChange}/>
+                <span className="detail-divider"/>
+                <button
+                  className="btn-primary"
+                  onClick={onCreateClick}
+                  disabled={creating || !task?.title?.trim() || !canCreate}
+                  title={!canCreate ? "You don't have permission to create tasks" : 'Create task'}
+                >
+                  <Icon name="plus" size={13}/>
+                  <span>{creating ? 'Creating…' : 'Create'}</span>
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -338,6 +358,8 @@ export function DetailPanel({
                 >
                   <Icon name="chevron-r" size={15}/>
                 </button>
+                <span className="detail-divider"/>
+                <LayoutToggle mode={mode} isPopup={isPopup} onModeChange={onModeChange}/>
                 <span className="detail-divider"/>
                 <div className="detail-menu-wrap" style={{ position: 'relative' }}>
                   <button
@@ -686,6 +708,28 @@ function Audit({ task, assignee }) {
           <span className="audit-value">{fmtFullDateTime(task.lastmodifieddate)}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- layout (side panel ⇄ center popup) toggle ---------- */
+function LayoutToggle({ mode, isPopup, onModeChange }) {
+  return (
+    <div className="detail-modeseg" role="group" aria-label="Panel layout">
+      <button
+        className={mode === 'panel' ? 'is-active' : ''}
+        onClick={() => onModeChange?.('panel')}
+        title="Side panel" aria-label="Side panel"
+      >
+        <Icon name="panel-side" size={15}/>
+      </button>
+      <button
+        className={isPopup ? 'is-active' : ''}
+        onClick={() => onModeChange?.('popup')}
+        title="Center popup" aria-label="Center popup"
+      >
+        <Icon name="panel-center" size={15}/>
+      </button>
     </div>
   );
 }

@@ -19,7 +19,7 @@ import { BoardView }    from './views/BoardView.jsx';
 import { CalendarView } from './views/CalendarView.jsx';
 import { GroupedView }  from './views/GroupedView.jsx';
 import { normaliseStatus, isToday } from './components/Shared.jsx';
-import { usePreferences } from './preferences.js';
+import { usePreferences, usePref } from './preferences.js';
 
 export default function App({ user, hypermedia, isMock }) {
   const [prefs, setPrefs] = usePreferences();
@@ -32,6 +32,7 @@ export default function App({ user, hypermedia, isMock }) {
   const [filters, setFilters]       = useState({ status: null, priority: null, assignee: null });
   const [selectedId, setSelectedId] = useState(null);
   const [calAnchor, setCalAnchor]   = useState(new Date());
+  const [detailMode, setDetailMode] = usePref('detailMode', 'panel');
 
   /* ------- data ------- */
   const [tasks, setTasks]     = useState([]);
@@ -452,6 +453,8 @@ export default function App({ user, hypermedia, isMock }) {
         api={api}
         onAfterPatch={onAfterPatch}
         onAfterDelete={onAfterDelete}
+        mode={detailMode}
+        onModeChange={setDetailMode}
       />
     </div>
   );

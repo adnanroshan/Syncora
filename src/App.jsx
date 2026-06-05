@@ -96,9 +96,10 @@ export default function App({ user, hypermedia, isMock }) {
     return {
       username,
       userid:   matched?.userid ?? meUserId ?? null,
-      // Prefer the real backend name, then the login username; only fall back
-      // to the id_token `name` claim (often a generic like "user") last.
-      name:     matched?.name || username || user.name,
+      // For the logged-in user, their login handle (preferred_username) is the
+      // authoritative identity — prefer it over the backend `name`, which here
+      // is a placeholder ("user"). Fall back to backend name, then token name.
+      name:     username || matched?.name || user.name,
       email:    user.email,
       picture:  user.picture,
       hue:      hashHue(username),

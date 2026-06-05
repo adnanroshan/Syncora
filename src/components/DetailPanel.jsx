@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Icon, StatusGlyph } from './Icons.jsx';
 import {
   Avatar, OrgMark, PriorityMark, DueChip,
@@ -21,6 +22,10 @@ import { TaskAttachments } from './TaskAttachments.jsx';
 import { Lightbox } from './Lightbox.jsx';
 import { usePref } from '../preferences.js';
 import { classify, downloadAttachment } from '../attachments.js';
+import { useAttachments } from '../hooks/queries.js';
+import { qk } from '../queryKeys.js';
+
+const EMPTY_ATTS = [];
 
 function genUuid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -46,22 +51,30 @@ export function DetailPanel({
   const [openPicker, setOpenPicker] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  /* ---- attachments ---- */
-  const [attachments, setAttachments] = useState([]);
+  /* ---- attachments (TanStack cache + polling, with a pending-upload overlay) ---- */
+  const queryClient = useQueryClient();
   const [lightbox, setLightbox] = useState(null);          // { index } | null
   const [attView, setAttView] = usePref('attachmentsView', 'grid');
   const [jumpRequest, setJumpRequest] = useState(null);    // { messageid, nonce }
+  const [pendingUploads, setPendingUploads] = useState([]); // uploading/failed optimistic rows
   const resolver = api.fetchAttachmentBlobUrl;
 
-  /* Load task attachments whenever a saved task is shown. */
-  useEffect(() => {
-    if (isDraft || taskId == null) { setAttachments([]); return; }
-    let cancelled = false;
-    api.listAttachments(taskId)
-      .then(rows => { if (!cancelled) setAttachments(rows); })
-      .catch(() => { if (!cancelled) setAttachments([]); });
-    return () => { cancelled = true; };
-  }, [taskId, isDraft, api]);
+  const attachmentsQ = useAttachments(task?.taskid, {
+    enabled: !isDraft && task?.taskid != null,
+    paused: pendingUploads.length > 0,
+  });
+  const serverAtts = attachmentsQ.data || EMPTY_ATTS;
+
+  /* Merge server rows with in-flight uploads (deduped by attachmentid — the
+   * client-generated UUID is reused as the persisted id, so a row that lands
+   * in the polled cache supersedes its pending entry). */
+  const attachments = useMemo(() => {
+    const serverIds = new Set(serverAtts.map(a => a.attachmentid));
+    return [...serverAtts, ...pendingUploads.filter(p => !serverIds.has(p.attachmentid))];
+  }, [serverAtts, pendingUploads]);
+
+  /* Reset in-flight uploads when switching tasks. */
+  useEffect(() => { setPendingUploads([]); }, [task?.taskid]);
 
   /* All task images (task- AND message-sourced), oldest→newest, for the
    * lightbox to walk as one list. Failed optimistic rows are excluded. */
@@ -78,7 +91,9 @@ export function DetailPanel({
   };
 
   /* Optimistic upload. One multipart POST per file; the optimistic card and
-   * the persisted row share a client-generated UUID, so no temp-id swap. */
+   * the persisted row share a client-generated UUID, so no temp-id swap. On
+   * success the row is written into the attachments cache and dropped from
+   * the pending overlay; on failure it stays for Retry. */
   const addFiles = async (files, messageid = null) => {
     if (!task || isDraft) return;
     const me = currentUser?.userid;
@@ -95,38 +110,43 @@ export function DetailPanel({
       };
       return { id, file, optimistic };
     });
-    setAttachments(prev => [...prev, ...jobs.map(j => j.optimistic)]);
+    setPendingUploads(prev => [...prev, ...jobs.map(j => j.optimistic)]);
 
     await Promise.all(jobs.map(async ({ id, file, optimistic }) => {
       try {
         const saved = await api.createAttachment({
           taskid: tid, messageid: messageid ?? null, uploadedbyuserid: me,
           file, attachmentid: id,
-          onProgress: (p) => setAttachments(prev => prev.map(a => a.attachmentid === id ? { ...a, progress: p } : a)),
+          onProgress: (p) => setPendingUploads(prev => prev.map(a => a.attachmentid === id ? { ...a, progress: p } : a)),
         });
-        setAttachments(prev => prev.map(a => a.attachmentid === id
-          ? { ...saved, url: optimistic.url || saved.url, status: 'done' }
-          : a));
+        queryClient.setQueryData(qk.attachments(tid), (prev = []) =>
+          prev.some(a => a.attachmentid === id) ? prev : [...prev, { ...saved, url: optimistic.url || saved.url }]);
+        setPendingUploads(prev => prev.filter(a => a.attachmentid !== id));
       } catch {
-        setAttachments(prev => prev.map(a => a.attachmentid === id ? { ...a, status: 'failed' } : a));
+        setPendingUploads(prev => prev.map(a => a.attachmentid === id ? { ...a, status: 'failed' } : a));
       }
     }));
   };
 
   const retryAtt = (a) => {
     if (!a?._file) return;
-    setAttachments(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
+    setPendingUploads(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
     addFiles([a._file], a.messageid ?? null);
   };
 
   const deleteAtt = async (a) => {
-    const before = attachments;
-    setAttachments(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
-    if (a.status === 'failed') return;        // never persisted — local removal only
+    // In-flight / failed rows were never persisted — drop them locally.
+    if (a.status === 'uploading' || a.status === 'failed') {
+      setPendingUploads(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
+      return;
+    }
+    const key = qk.attachments(task.taskid);
+    const snapshot = queryClient.getQueryData(key);
+    queryClient.setQueryData(key, (list = []) => list.filter(x => x.attachmentid !== a.attachmentid));
     try {
       await api.deleteAttachment(a.attachmentid);
     } catch (err) {
-      setAttachments(before);
+      if (snapshot) queryClient.setQueryData(key, snapshot);
       alert('Could not delete attachment: ' + prettyErr(err));
     }
   };

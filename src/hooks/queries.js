@@ -74,3 +74,77 @@ export function useUnread(enabled) {
     staleTime: 5_000,
   });
 }
+
+/* ---- Phase 3: per-task polling (only the open task, gated on visibility,
+ *      and paused while a mutation is in flight to avoid clobbering the
+ *      optimistic state mid-write). ---- */
+
+export function useActivity(taskId, { enabled = true, paused = false } = {}) {
+  const visible = usePageVisible();
+  const on = enabled && taskId != null;
+  return useQuery({
+    queryKey: qk.activity(taskId),
+    queryFn: () => api.listActivity(taskId),
+    enabled: on,
+    refetchInterval: (visible && on && !paused) ? POLL.activity : false,
+    staleTime: 4_000,
+  });
+}
+
+export function useMessages(taskId, { enabled = true, paused = false } = {}) {
+  const visible = usePageVisible();
+  const on = enabled && taskId != null;
+  return useQuery({
+    queryKey: qk.messages(taskId),
+    queryFn: () => api.listMessages(taskId),
+    enabled: on,
+    refetchInterval: (visible && on && !paused) ? POLL.messages : false,
+    staleTime: 1_000,
+  });
+}
+
+/* Reactions are fetched by message-id list (no "all reactions for task"
+ * endpoint). Re-runs as the message set grows; polled alongside messages. */
+export function useReactions(taskId, messageIds, { enabled = true, paused = false } = {}) {
+  const visible = usePageVisible();
+  const ids = messageIds || [];
+  const on = enabled && taskId != null && ids.length > 0;
+  return useQuery({
+    queryKey: qk.reactions(taskId),
+    queryFn: () => api.listReactionsForMessages(ids),
+    enabled: on,
+    refetchInterval: (visible && on && !paused) ? POLL.reactions : false,
+    staleTime: 1_000,
+  });
+}
+
+export function useReadMarker(taskId, userId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: qk.readMarker(taskId, userId),
+    queryFn: () => api.getReadMarker(taskId, userId),  // returns null on 404
+    enabled: enabled && taskId != null && userId != null,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useAssignees(taskId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: qk.assignees(taskId),
+    queryFn: () => api.listAssignees(taskId),
+    enabled: enabled && taskId != null,
+    staleTime: 60_000,
+  });
+}
+
+export function useAttachments(taskId, { enabled = true, paused = false } = {}) {
+  const visible = usePageVisible();
+  const on = enabled && taskId != null;
+  return useQuery({
+    queryKey: qk.attachments(taskId),
+    queryFn: () => api.listAttachments(taskId),
+    enabled: on,
+    refetchInterval: (visible && on && !paused) ? POLL.attachments : false,
+    staleTime: 1_000,
+  });
+}

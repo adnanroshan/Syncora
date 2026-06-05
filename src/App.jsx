@@ -17,12 +17,14 @@ import { Sidebar }     from './components/Sidebar.jsx';
 import { TopBar }      from './components/TopBar.jsx';
 import { ViewTabs }    from './components/ViewTabs.jsx';
 import { DetailPanel } from './components/DetailPanel.jsx';
+import { Toasts } from './components/Toasts.jsx';
 import { ListView }     from './views/ListView.jsx';
 import { BoardView }    from './views/BoardView.jsx';
 import { CalendarView } from './views/CalendarView.jsx';
 import { GroupedView }  from './views/GroupedView.jsx';
 import { normaliseStatus, isToday } from './components/Shared.jsx';
 import { usePreferences, usePref } from './preferences.js';
+import { useMessageNotifications } from './hooks/useMessageNotifications.js';
 
 /* Stable empty defaults so a loading query doesn't churn referential identity. */
 const EMPTY_ARR = [];
@@ -41,6 +43,7 @@ export default function App({ user, hypermedia, isMock }) {
   const [selectedId, setSelectedId] = useState(null);
   const [calAnchor, setCalAnchor]   = useState(new Date());
   const [detailMode, setDetailMode] = usePref('detailMode', 'panel');
+  const [pendingJump, setPendingJump] = useState(null);  // { messageid, nonce } for toast → jump
 
   /* ------- data (TanStack Query — cache + background revalidation) ------- */
   const queryClient = useQueryClient();
@@ -131,6 +134,7 @@ export default function App({ user, hypermedia, isMock }) {
 
   /* Index users by id so tasks can show the assignee's name/avatar. */
   const usersById = useMemo(() => indexBy(lookups.users, u => u.userid), [lookups.users]);
+  const tasksById = useMemo(() => indexBy(tasks, t => t.taskid), [tasks]);
 
   /* Orgs the user is allowed to see — drives the Sidebar Clients list and
    * the Client picker. Falls back to the full org list while the access
@@ -185,6 +189,18 @@ export default function App({ user, hypermedia, isMock }) {
     () => queryClient.invalidateQueries({ queryKey: qk.unread() }),
     [queryClient],
   );
+
+  /* Toast notifications for incoming messages / mentions (derived from the
+   * unread poll). Clicking one opens the task and jumps to the message. */
+  const { toasts, dismiss: dismissToast } = useMessageNotifications({
+    unreadRows, api, meId: me?.userid, openTaskId: selectedId,
+    usersById, tasksById, enabled: me?.userid != null,
+  });
+  const openFromToast = useCallback((note) => {
+    setSelectedId(note.taskid);
+    setPendingJump({ messageid: note.messageid, nonce: Date.now() });
+    dismissToast(note.id);
+  }, [dismissToast]);
 
   /* Per-task unread / mention counts (from /v2/taskunread). */
   const unreadByTask = useMemo(() => {
@@ -448,7 +464,10 @@ export default function App({ user, hypermedia, isMock }) {
         onAfterDelete={onAfterDelete}
         mode={detailMode}
         onModeChange={setDetailMode}
+        jumpToMessage={pendingJump}
       />
+
+      <Toasts toasts={toasts} onDismiss={dismissToast} onOpen={openFromToast}/>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export function DetailPanel({
   taskId, draftTask, creating,
   onClose, onNavigate, onDiscardDraft, onCommitDraft,
   allTasks, lookups, usersById, currentUser, api, onAfterPatch, onAfterDelete,
-  mode = 'panel', onModeChange,
+  mode = 'panel', onModeChange, jumpToMessage,
 }) {
   const isDraft = !!draftTask;
   const isPopup = mode === 'popup';
@@ -75,6 +75,12 @@ export function DetailPanel({
 
   /* Reset in-flight uploads when switching tasks. */
   useEffect(() => { setPendingUploads([]); }, [task?.taskid]);
+
+  /* External jump request (from a notification toast) → drive the same
+   * scroll/flash path used by the attachment "from message" badge. */
+  useEffect(() => {
+    if (jumpToMessage?.messageid != null) setJumpRequest(jumpToMessage);
+  }, [jumpToMessage]);
 
   /* All task images (task- AND message-sourced), oldest→newest, for the
    * lightbox to walk as one list. Failed optimistic rows are excluded. */

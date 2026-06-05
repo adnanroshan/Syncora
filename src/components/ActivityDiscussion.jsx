@@ -226,14 +226,22 @@ export function ActivityDiscussion({
   useEffect(() => {
     if (jumpRequest?.messageid == null) return;
     setTab('discussion');
-    const id = setTimeout(() => {
+    let tries = 0;
+    let timer;
+    const tryScroll = () => {
       const el = messageRefs.current[jumpRequest.messageid];
-      if (!el) return;
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.add('chat-msg-flash');
-      setTimeout(() => el.classList.remove('chat-msg-flash'), 1600);
-    }, 120);
-    return () => clearTimeout(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('chat-msg-flash');
+        setTimeout(() => el.classList.remove('chat-msg-flash'), 1600);
+        return;
+      }
+      // Message may not be rendered yet (task/messages still loading after a
+      // toast click) — retry for a few seconds.
+      if (tries++ < 25) timer = setTimeout(tryScroll, 150);
+    };
+    timer = setTimeout(tryScroll, 120);
+    return () => clearTimeout(timer);
   }, [jumpRequest]);
 
   const taskAssigneeUsers = useMemo(

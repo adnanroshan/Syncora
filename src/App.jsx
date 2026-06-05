@@ -7,9 +7,12 @@
  */
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import * as api from './api.js';
 import { logout } from './auth.js';
+import { qk } from './queryKeys.js';
+import { useTasks, useLookups, useAllAssignees, useUnread } from './hooks/queries.js';
 import { Sidebar }     from './components/Sidebar.jsx';
 import { TopBar }      from './components/TopBar.jsx';
 import { ViewTabs }    from './components/ViewTabs.jsx';
@@ -20,6 +23,11 @@ import { CalendarView } from './views/CalendarView.jsx';
 import { GroupedView }  from './views/GroupedView.jsx';
 import { normaliseStatus, isToday } from './components/Shared.jsx';
 import { usePreferences, usePref } from './preferences.js';
+
+/* Stable empty defaults so a loading query doesn't churn referential identity. */
+const EMPTY_ARR = [];
+const EMPTY_TASKS = [];
+const EMPTY_LOOKUPS = { orgs: [], products: [], modules: [], taskgroups: [], users: [] };
 
 export default function App({ user, hypermedia, isMock }) {
   const [prefs, setPrefs] = usePreferences();
@@ -34,13 +42,17 @@ export default function App({ user, hypermedia, isMock }) {
   const [calAnchor, setCalAnchor]   = useState(new Date());
   const [detailMode, setDetailMode] = usePref('detailMode', 'panel');
 
-  /* ------- data ------- */
-  const [tasks, setTasks]     = useState([]);
-  const [lookups, setLookups] = useState({ orgs: [], products: [], modules: [], taskgroups: [], users: [] });
-  const [allAssignees, setAllAssignees] = useState([]);
-  const [unreadRows, setUnreadRows] = useState([]);
-  const [loading, setLoad]    = useState(true);
-  const [error, setError]     = useState(null);
+  /* ------- data (TanStack Query — cache + background revalidation) ------- */
+  const queryClient = useQueryClient();
+  const tasksQ      = useTasks();
+  const lookupsQ    = useLookups();
+  const assigneesQ  = useAllAssignees();
+
+  const tasks        = tasksQ.data || EMPTY_TASKS;
+  const lookups      = lookupsQ.data || EMPTY_LOOKUPS;
+  const allAssignees = assigneesQ.data || EMPTY_ARR;
+  const loading      = tasksQ.isLoading || lookupsQ.isLoading;
+  const error        = tasksQ.error ? prettyErr(tasksQ.error) : null;
   const [creating, setCreating] = useState(false);
   // Logged-in user's `userid` from the backend (used for createdbyuserid on
   // task POST/PATCH). Resolved lazily via /v2/users?filter=(username='…').
@@ -52,22 +64,6 @@ export default function App({ user, hypermedia, isMock }) {
   // Sidebar's Clients section and the Client/Product/Module pickers.
   const [userOrgs, setUserOrgs] = useState([]);
   const [userProductsModules, setUserProductsModules] = useState([]);
-
-  const reload = useCallback(async () => {
-    setLoad(true); setError(null);
-    try {
-      const { tasks, lookups, assignees } = await api.loadEverything();
-      setTasks(tasks);
-      setLookups(lookups);
-      setAllAssignees(assignees || []);
-    } catch (err) {
-      setError(prettyErr(err));
-    } finally {
-      setLoad(false);
-    }
-  }, []);
-
-  useEffect(() => { reload(); }, [reload]);
 
   /* ------- indexes ------- */
   const orgsById     = useMemo(() => indexBy(lookups.orgs,     o => o.id ?? o.organisationid), [lookups.orgs]);
@@ -206,18 +202,15 @@ export default function App({ user, hypermedia, isMock }) {
     [tasks, usersById, assigneesByTask],
   );
 
-  /* Refresh per-task unread counts (called on app load + when the detail
-   * panel closes so badges clear for a task you just read). Backend scopes
+  /* Per-task unread counts — light app-wide polling (gated on tab
+   * visibility) so badges update without reselecting a task. Backend scopes
    * to the logged-in user from auth context — no userid in the URL. */
-  const refreshUnread = useCallback(async () => {
-    if (me?.userid == null) { setUnreadRows([]); return; }
-    try {
-      const rows = await api.listMyUnread();
-      setUnreadRows(rows || []);
-    } catch { /* swallow */ }
-  }, [me?.userid]);
-
-  useEffect(() => { refreshUnread(); }, [refreshUnread, tasks]);
+  const unreadQ = useUnread(me?.userid != null);
+  const unreadRows = unreadQ.data || EMPTY_ARR;
+  const refreshUnread = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: qk.unread() }),
+    [queryClient],
+  );
 
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */
   useEffect(() => {
@@ -294,14 +287,16 @@ export default function App({ user, hypermedia, isMock }) {
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [decoratedTasks, usersById]);
 
-  /* ------- mutations ------- */
+  /* ------- mutations (write through the tasks cache) ------- */
   const onAfterPatch = useCallback((updatedTask) => {
-    setTasks(prev => prev.map(t => t.taskid === updatedTask.taskid ? { ...t, ...updatedTask } : t));
-  }, []);
+    queryClient.setQueryData(qk.tasks(), (prev = []) =>
+      prev.map(t => t.taskid === updatedTask.taskid ? { ...t, ...updatedTask } : t));
+  }, [queryClient]);
 
   const onAfterDelete = useCallback((deletedTask) => {
-    setTasks(prev => prev.filter(t => t.taskid !== deletedTask.taskid));
-  }, []);
+    queryClient.setQueryData(qk.tasks(), (prev = []) =>
+      prev.filter(t => t.taskid !== deletedTask.taskid));
+  }, [queryClient]);
 
   /* "New task" no longer POSTs. It opens an in-memory draft in the detail
    * panel. The POST fires later, when the user clicks the Create button. */
@@ -332,7 +327,7 @@ export default function App({ user, hypermedia, isMock }) {
     try {
       const created = await api.createTask(draft);
       const decorated = { ...created, assignee: usersById[created.createdbyuserid] || null };
-      setTasks(prev => [decorated, ...prev]);
+      queryClient.setQueryData(qk.tasks(), (prev = []) => [decorated, ...prev]);
       setDraftTask(null);
       setSelectedId(decorated.taskid);
       return decorated;
@@ -342,7 +337,7 @@ export default function App({ user, hypermedia, isMock }) {
     } finally {
       setCreating(false);
     }
-  }, [creating, usersById]);
+  }, [creating, usersById, queryClient]);
 
   /* ------- keyboard shortcuts ------- */
   useEffect(() => {

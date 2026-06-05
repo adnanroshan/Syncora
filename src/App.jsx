@@ -76,29 +76,22 @@ export default function App({ user, hypermedia, isMock }) {
       return { username: 'me', userid: 8, name: 'You', hue: 165, isMe: true };
     }
     if (!user) return null;
-    const candidates = [
-      user?.raw?.preferred_username,
-      user?.raw?.unique_name,
-      user?.email,
-      user?.sub,
-      user?.name,
-    ].filter(Boolean).map(s => String(s).toLowerCase());
+    // The login handle from the id_token is authoritative for the current user.
+    const handle = user?.raw?.preferred_username || user?.raw?.unique_name || null;
+    const subId  = user?.sub != null ? String(user.sub) : null;
+    const subNum = subId != null && /^\d+$/.test(subId) ? Number(subId) : null;
+    const textCandidates = [handle, user?.email].filter(Boolean).map(s => String(s).toLowerCase());
+    // Match the backend row by userid (sub) first, then by handle/email.
     const matched = (lookups.users || []).find(u => {
-      const fields = [u.username, u.email, u.name].filter(Boolean).map(s => String(s).toLowerCase());
-      return fields.some(f => candidates.includes(f));
+      if (subId != null && String(u.userid) === subId) return true;
+      const fields = [u.username, u.email].filter(Boolean).map(s => String(s).toLowerCase());
+      return fields.some(f => textCandidates.includes(f));
     });
-    const username = matched?.username
-      || user?.raw?.preferred_username
-      || user?.raw?.unique_name
-      || user?.email
-      || user?.sub
-      || null;
+    // Display the login handle; only fall back to backend/token name if absent.
+    const username = handle || matched?.username || user?.email || subId || null;
     return {
       username,
-      userid:   matched?.userid ?? meUserId ?? null,
-      // For the logged-in user, their login handle (preferred_username) is the
-      // authoritative identity — prefer it over the backend `name`, which here
-      // is a placeholder ("user"). Fall back to backend name, then token name.
+      userid:   matched?.userid ?? subNum ?? meUserId ?? null,
       name:     username || matched?.name || user.name,
       email:    user.email,
       picture:  user.picture,

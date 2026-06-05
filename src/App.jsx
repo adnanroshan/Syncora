@@ -178,6 +178,16 @@ export default function App({ user, hypermedia, isMock }) {
     return out;
   }, [allAssignees]);
 
+  /* Per-task unread counts — light app-wide polling (gated on tab
+   * visibility) so badges update without reselecting a task. Backend scopes
+   * to the logged-in user from auth context — no userid in the URL. */
+  const unreadQ = useUnread(me?.userid != null);
+  const unreadRows = unreadQ.data || EMPTY_ARR;
+  const refreshUnread = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: qk.unread() }),
+    [queryClient],
+  );
+
   /* Per-task unread / mention counts (from /v2/taskunread). */
   const unreadByTask = useMemo(() => {
     const out = {};
@@ -200,16 +210,6 @@ export default function App({ user, hypermedia, isMock }) {
       };
     }),
     [tasks, usersById, assigneesByTask],
-  );
-
-  /* Per-task unread counts — light app-wide polling (gated on tab
-   * visibility) so badges update without reselecting a task. Backend scopes
-   * to the logged-in user from auth context — no userid in the URL. */
-  const unreadQ = useUnread(me?.userid != null);
-  const unreadRows = unreadQ.data || EMPTY_ARR;
-  const refreshUnread = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: qk.unread() }),
-    [queryClient],
   );
 
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */

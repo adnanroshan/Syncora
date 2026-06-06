@@ -32,9 +32,9 @@ export function useTasks() {
     queryKey: qk.tasks(),
     queryFn: async () => {
       // ACL gate preserved from the old loadEverything(): refuse early if
-      // the user's hypermedia doesn't expose tasks.
+      // the user's hypermedia exposes neither tasks resource.
       const h = getApiHypermedia();
-      if (!IS_MOCK && h && !h.tasks) {
+      if (!IS_MOCK && h && !h.tasks && !h.tasksfresh) {
         const e = new Error('You do not have access to tasks.');
         e.code = 403;
         throw e;

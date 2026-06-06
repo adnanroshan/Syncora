@@ -78,25 +78,25 @@ export async function loadEverything() {
 }
 
 export async function listTasks() {
-  const url = hypermediaUrl('tasks', '~/v2/tasks');
+  const url = hypermediaUrl('tasksfresh', '~/v2/tasksfresh');
   return { collection: await restfulAll(url) };
 }
 
 export async function getTask(taskid) {
-  return restful({ url: `~/v2/tasks/${encodeURIComponent(taskid)}` });
+  return restful({ url: `~/v2/tasksfresh/${encodeURIComponent(taskid)}` });
 }
 
 export async function createTask(data) {
-  return restful({ method: 'POST', url: '~/v2/tasks', body: data });
+  return restful({ method: 'POST', url: '~/v2/tasksfresh', body: data });
 }
 
 export async function patchTask(task, patch) {
-  const url = task?._links?.edit?.href || `~/v2/tasks/${task.taskid}`;
+  const url = task?._links?.edit?.href || `~/v2/tasksfresh/${task.taskid}`;
   return restful({ method: 'PATCH', url, body: patch });
 }
 
 export async function deleteTask(task) {
-  const url = task?._links?.delete?.href || `~/v2/tasks/${task.taskid}`;
+  const url = task?._links?.delete?.href || `~/v2/tasksfresh/${task.taskid}`;
   return restful({ method: 'DELETE', url });
 }
 
@@ -158,7 +158,7 @@ export async function setPrimaryAssignee(taskid, assigneduserid) {
 
 export async function listSubtasks(parenttaskid) {
   if (parenttaskid == null) return [];
-  return restfulAll(`~/v2/tasks?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})`);
+  return restfulAll(`~/v2/tasksfresh?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})`);
 }
 
 export async function listAllAssignees() {
@@ -506,7 +506,7 @@ const MOCK = {
 function handleMock({ method = 'GET', url, body } = {}) {
   const path = stripTilde(url).split('?')[0];
 
-  if (method === 'GET' && path === '/v2/tasks') {
+  if (method === 'GET' && path === '/v2/tasksfresh') {
     const q = decodeURIComponent(String(url).split('?')[1] || '');
     const m = q.match(/parenttaskid=(\d+|null)/);
     let rows = MOCK.tasks;
@@ -518,20 +518,20 @@ function handleMock({ method = 'GET', url, body } = {}) {
     }
     return { collection: rows, count: rows.length };
   }
-  if (method === 'GET' && path.startsWith('/v2/tasks/')) {
+  if (method === 'GET' && path.startsWith('/v2/tasksfresh/')) {
     const id = parseInt(path.split('/').pop(), 10);
     const t  = MOCK.tasks.find(x => x.taskid === id);
     if (!t) throw mkError(404, 'not_found', 'Task not found');
     return withLinks(t);
   }
-  if (method === 'POST' && path === '/v2/tasks') {
+  if (method === 'POST' && path === '/v2/tasksfresh') {
     const id = MOCK.nextId++;
     const now = new Date().toISOString();
     const decorated = decorateTask({ ...body, taskid: id, creationdate: now, lastmodifieddate: now });
     MOCK.tasks.unshift(decorated);
     return withLinks(decorated);
   }
-  if (method === 'PATCH' && path.startsWith('/v2/tasks/')) {
+  if (method === 'PATCH' && path.startsWith('/v2/tasksfresh/')) {
     const id = parseInt(path.split('/').pop(), 10);
     const i  = MOCK.tasks.findIndex(x => x.taskid === id);
     if (i < 0) throw mkError(404, 'not_found', 'Task not found');
@@ -539,7 +539,7 @@ function handleMock({ method = 'GET', url, body } = {}) {
     MOCK.tasks[i] = merged;
     return withLinks(merged);
   }
-  if (method === 'DELETE' && path.startsWith('/v2/tasks/')) {
+  if (method === 'DELETE' && path.startsWith('/v2/tasksfresh/')) {
     const id = parseInt(path.split('/').pop(), 10);
     MOCK.tasks = MOCK.tasks.filter(x => x.taskid !== id);
     return {};
@@ -825,7 +825,7 @@ function handleMock({ method = 'GET', url, body } = {}) {
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {
-    return { tasks: { _links: { first: { href: '~/v2/tasks' } } } };
+    return { tasks: { _links: { first: { href: '~/v2/tasksfresh' } } } };
   }
 
   throw mkError(404, 'no_route', `Mock: no route for ${method} ${path}`);
@@ -857,9 +857,9 @@ function withLinks(t) {
   return {
     ...t,
     _links: {
-      self:   { href: `~/v2/tasks/${t.taskid}` },
-      edit:   { href: `~/v2/tasks/${t.taskid}` },
-      delete: { href: `~/v2/tasks/${t.taskid}` },
+      self:   { href: `~/v2/tasksfresh/${t.taskid}` },
+      edit:   { href: `~/v2/tasksfresh/${t.taskid}` },
+      delete: { href: `~/v2/tasksfresh/${t.taskid}` },
     },
   };
 }

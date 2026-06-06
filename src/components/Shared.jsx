@@ -39,8 +39,9 @@ function deterministicHue(seed) {
 }
 
 export function Avatar({ user, name, size = 20, title }) {
-  // accepts either a structured user {name, hue, isMe} or just a display name
-  const displayName = user?.name || name;
+  // accepts either a structured user {name, hue, isMe} or just a display name.
+  // Backend users often have no `name`, only `username` — fall back to it.
+  const displayName = user?.name || user?.username || name;
   if (!displayName) {
     return (
       <span className="avatar avatar--empty"

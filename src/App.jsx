@@ -233,7 +233,10 @@ export default function App({ user, hypermedia, isMock }) {
     () => tasks.map(t => {
       const rows = assigneesByTask[t.taskid] || [];
       const primary = rows.find(r => r.isprimary) || rows[0] || null;
-      const primaryUser = primary ? usersById[primary.assigneduserid] : null;
+      const primaryUser = primary
+        ? (usersById[primary.assigneduserid]
+           || (primary.assignedusername ? { username: primary.assignedusername } : null))
+        : null;
       // Also honour the task's single `usersusername` assignee (the detail
       // panel's "Assignee" field) so the grid avatar matches it.
       const byUsername = t.usersusername
@@ -246,18 +249,6 @@ export default function App({ user, hypermedia, isMock }) {
     }),
     [tasks, usersById, usersByUsername, assigneesByTask],
   );
-
-  // TEMP: dump assignment-relevant fields per task to find where the assignee lives
-  useEffect(() => {
-    if (!tasks.length) return;
-    console.log('[DEBUG] task assignment fields\n' + JSON.stringify(tasks.map(t => ({
-      taskid: t.taskid,
-      usersusername: t.usersusername,
-      createdbyuserid: t.createdbyuserid,
-      taskassigneeRows: assigneesByTask[t.taskid],
-      allKeys: Object.keys(t),
-    })), null, 2));
-  }, [tasks, assigneesByTask]);
 
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */
   useEffect(() => {

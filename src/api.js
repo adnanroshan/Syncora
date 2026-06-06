@@ -26,6 +26,41 @@ function restful(opts) {
 }
 
 /* ------------------------------------------------------------ *
+ * Pagination — page=0,1,2,… until a page returns no NEW rows.    *
+ * No fixed `limit`; each page is the backend's default size. A   *
+ * dedupe guard (by self-link/identity) also stops cleanly if the *
+ * backend ignores `page` and repeats the first page (e.g. mock). *
+ * ------------------------------------------------------------ */
+const MAX_PAGES = 1000;
+
+function withPage(url, page) {
+  const [path, qs = ''] = String(url).split('?');
+  const params = qs.split('&').filter(p => p && !/^page=/i.test(p) && !/^limit=/i.test(p));
+  params.push('page=' + page);
+  return `${path}?${params.join('&')}`;
+}
+
+async function restfulAll(baseUrl) {
+  const out = [];
+  const seen = new Set();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const r = await restful({ url: withPage(baseUrl, page) });
+    const rows = r?.collection || [];
+    if (rows.length === 0) break;                       // empty page → done
+    let added = 0;
+    for (const row of rows) {
+      const key = row?._links?.self?.href || JSON.stringify(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+      added++;
+    }
+    if (added === 0) break;                             // no new rows → done
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------ *
  * Public API                                                     *
  * ------------------------------------------------------------ */
 export async function loadEverything() {
@@ -44,7 +79,7 @@ export async function loadEverything() {
 
 export async function listTasks() {
   const url = hypermediaUrl('tasks', '~/v2/tasks');
-  return restful({ url });
+  return { collection: await restfulAll(url) };
 }
 
 export async function getTask(taskid) {
@@ -81,32 +116,27 @@ export async function findUserByUsername(username) {
 
 export async function listUserOrgs(userid) {
   if (userid == null) return [];
-  const r = await restful({ url: `~/v2/userorgs?userid=${encodeURIComponent(userid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userorgs?userid=${encodeURIComponent(userid)}`);
 }
 
 export async function listUserProductsModules(userid) {
   if (userid == null) return [];
-  const r = await restful({ url: `~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}`);
 }
 
 export async function listOrgAccessRows(organisationid) {
   if (organisationid == null) return [];
-  const r = await restful({ url: `~/v2/userorgs?organisationid=${encodeURIComponent(organisationid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userorgs?organisationid=${encodeURIComponent(organisationid)}`);
 }
 
 export async function listProductAccessRows(productid) {
   if (productid == null) return [];
-  const r = await restful({ url: `~/v2/userproductsmodules?productid=${encodeURIComponent(productid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userproductsmodules?productid=${encodeURIComponent(productid)}`);
 }
 
 export async function listAssignees(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskassignees?taskid=${encodeURIComponent(taskid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskassignees?taskid=${encodeURIComponent(taskid)}`);
 }
 
 export async function addAssignee({ taskid, assigneduserid, isprimary = false }) {
@@ -128,23 +158,21 @@ export async function setPrimaryAssignee(taskid, assigneduserid) {
 
 export async function listSubtasks(parenttaskid) {
   if (parenttaskid == null) return [];
-  const r = await restful({ url: `~/v2/tasks?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/tasks?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})`);
 }
 
 export async function listAllAssignees() {
   try {
-    const r = await restful({ url: '~/v2/taskassignees' });
-    return r?.collection || [];
+    return await restfulAll('~/v2/taskassignees');
   } catch { return []; }
 }
 
 export async function listMyUnread() {
   try {
-    const r = await restful({ url: '~/v2/taskunread' });
+    const rows = await restfulAll('~/v2/taskunread');
     // Normalize field casing: the backend returns lowercase
     // `unreadcount`/`mentioncount`; the UI reads camelCase.
-    return (r?.collection || []).map(row => ({
+    return rows.map(row => ({
       ...row,
       unreadCount:  row.unreadCount  ?? row.unreadcount  ?? 0,
       mentionCount: row.mentionCount ?? row.mentioncount ?? 0,
@@ -158,14 +186,12 @@ export async function listMyUnread() {
 
 export async function listActivity(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate%20desc&limit=100` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate%20desc`);
 }
 
 export async function listMessages(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate&limit=50` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate`);
 }
 
 export async function createMessage({ taskid, userid, parentmessageid = null, messagetext }) {
@@ -203,15 +229,13 @@ export async function addMention({ messageid, userid }) {
 export async function listMentionsForMessages(messageids) {
   if (!messageids?.length) return [];
   const list = messageids.map(i => encodeURIComponent(i)).join(',');
-  const r = await restful({ url: `~/v2/taskmessagementions?filter=(messageid%20IN%20(${list}))&limit=200` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskmessagementions?filter=(messageid%20IN%20(${list}))`);
 }
 
 export async function listReactionsForMessages(messageids) {
   if (!messageids?.length) return [];
   const list = messageids.map(i => encodeURIComponent(i)).join(',');
-  const r = await restful({ url: `~/v2/taskmessagereactions?filter=(messageid%20IN%20(${list}))&limit=500` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskmessagereactions?filter=(messageid%20IN%20(${list}))`);
 }
 
 export async function addReaction({ messageid, userid, emoji }) {
@@ -260,10 +284,8 @@ export async function upsertReadMarker(taskid, userid, lastreadmessageid) {
 
 export async function listAttachments(taskid) {
   if (taskid == null) return [];
-  const r = await restful({
-    url: `~/v2/attachments?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate&limit=200`,
-  });
-  return (r?.collection || []).map(normalizeAttachment);
+  const rows = await restfulAll(`~/v2/attachments?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate`);
+  return rows.map(normalizeAttachment);
 }
 
 export async function createAttachment({
@@ -432,9 +454,7 @@ export async function loadLookups() {
 
 async function safeList(resource) {
   try {
-    const url = hypermediaUrl(resource, `~/v2/${resource}`);
-    const r = await restful({ url });
-    return r?.collection || [];
+    return await restfulAll(hypermediaUrl(resource, `~/v2/${resource}`));
   } catch {
     return [];
   }

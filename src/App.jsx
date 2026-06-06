@@ -121,14 +121,14 @@ export default function App({ user, hypermedia, isMock }) {
   useEffect(() => {
     if (me?.userid == null) { setUserOrgs([]); setUserProductsModules([]); return; }
     let cancelled = false;
-    Promise.all([
-      api.listUserOrgs(me.userid),
-      api.listUserProductsModules(me.userid),
-    ]).then(([o, p]) => {
-      if (cancelled) return;
-      setUserOrgs(o);
-      setUserProductsModules(p);
-    });
+    // Fetch independently — one failing call must not discard the other's
+    // result (a failing /v2/userorgs was silently wiping the product list).
+    api.listUserOrgs(me.userid)
+      .then(o => { if (!cancelled) setUserOrgs(o || []); })
+      .catch(() => { if (!cancelled) setUserOrgs([]); });
+    api.listUserProductsModules(me.userid)
+      .then(p => { if (!cancelled) setUserProductsModules(p || []); })
+      .catch(() => { if (!cancelled) setUserProductsModules([]); });
     return () => { cancelled = true; };
   }, [me?.userid]);
 

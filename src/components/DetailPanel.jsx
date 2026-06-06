@@ -224,6 +224,11 @@ export function DetailPanel({
   const productsById   = useMemo(() => indexBy(lookups?.products,   p => p.id ?? p.productid),      [lookups]);
   const modulesById    = useMemo(() => indexBy(lookups?.modules,    m => m.id ?? m.moduleid),       [lookups]);
   const taskgroupsById = useMemo(() => indexBy(lookups?.taskgroups, g => g.id ?? g.taskgroupid),    [lookups]);
+  const usersByUsername = useMemo(() => {
+    const o = {};
+    (lookups?.users || []).forEach(u => { if (u?.username) o[u.username] = u; });
+    return o;
+  }, [lookups?.users]);
 
   /* Field-change helper. In draft mode it just updates local state. In
    * saved mode it does an optimistic PATCH against the backend. */
@@ -328,11 +333,6 @@ export function DetailPanel({
   const mod   = task ? modulesById[task.moduleid]     : null;
   const group = task ? taskgroupsById[task.taskgroupid] : null;
   const status = task ? normaliseStatus(task.status) : null;
-  const usersByUsername = useMemo(() => {
-    const o = {};
-    (lookups?.users || []).forEach(u => { if (u?.username) o[u.username] = u; });
-    return o;
-  }, [lookups?.users]);
   // The single "Assignee" field is the task's denormalized assignee
   // (`usersusername`) — display and edit must read/write the SAME field.
   const assignee = task?.usersusername

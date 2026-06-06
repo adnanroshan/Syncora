@@ -249,14 +249,14 @@ export default function App({ user, hypermedia, isMock }) {
 
   // TEMP: dump assignment-relevant fields per task to find where the assignee lives
   useEffect(() => {
-    console.log('[DEBUG] task assignment fields', tasks.map(t => ({
+    if (!tasks.length) return;
+    console.log('[DEBUG] task assignment fields\n' + JSON.stringify(tasks.map(t => ({
       taskid: t.taskid,
       usersusername: t.usersusername,
-      assignee: t.assignee,
       createdbyuserid: t.createdbyuserid,
       taskassigneeRows: assigneesByTask[t.taskid],
       allKeys: Object.keys(t),
-    })));
+    })), null, 2));
   }, [tasks, assigneesByTask]);
 
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */

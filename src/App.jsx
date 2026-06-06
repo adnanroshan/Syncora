@@ -247,6 +247,18 @@ export default function App({ user, hypermedia, isMock }) {
     [tasks, usersById, usersByUsername, assigneesByTask],
   );
 
+  // TEMP: dump assignment-relevant fields per task to find where the assignee lives
+  useEffect(() => {
+    console.log('[DEBUG] task assignment fields', tasks.map(t => ({
+      taskid: t.taskid,
+      usersusername: t.usersusername,
+      assignee: t.assignee,
+      createdbyuserid: t.createdbyuserid,
+      taskassigneeRows: assigneesByTask[t.taskid],
+      allKeys: Object.keys(t),
+    })));
+  }, [tasks, assigneesByTask]);
+
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */
   useEffect(() => {
     const totalUnread = unreadRows.reduce((n, r) => n + (r.unreadCount || 0), 0);

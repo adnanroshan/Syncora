@@ -137,6 +137,11 @@ export default function App({ user, hypermedia, isMock }) {
 
   /* Index users by id so tasks can show the assignee's name/avatar. */
   const usersById = useMemo(() => indexBy(lookups.users, u => u.userid), [lookups.users]);
+  const usersByUsername = useMemo(() => {
+    const o = {};
+    (lookups.users || []).forEach(u => { if (u?.username) o[u.username] = u; });
+    return o;
+  }, [lookups.users]);
   const tasksById = useMemo(() => indexBy(tasks, t => t.taskid), [tasks]);
 
   /* Orgs the user is allowed to see — drives the Sidebar Clients list and
@@ -229,12 +234,17 @@ export default function App({ user, hypermedia, isMock }) {
       const rows = assigneesByTask[t.taskid] || [];
       const primary = rows.find(r => r.isprimary) || rows[0] || null;
       const primaryUser = primary ? usersById[primary.assigneduserid] : null;
+      // Also honour the task's single `usersusername` assignee (the detail
+      // panel's "Assignee" field) so the grid avatar matches it.
+      const byUsername = t.usersusername
+        ? (usersByUsername[t.usersusername] || { username: t.usersusername })
+        : null;
       return {
         ...t,
-        assignee: primaryUser || t.assignee || usersById[t.createdbyuserid] || null,
+        assignee: primaryUser || byUsername || t.assignee || usersById[t.createdbyuserid] || null,
       };
     }),
-    [tasks, usersById, assigneesByTask],
+    [tasks, usersById, usersByUsername, assigneesByTask],
   );
 
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */

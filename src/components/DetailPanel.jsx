@@ -316,14 +316,24 @@ export function DetailPanel({
       if (map.has(r.moduleid)) return;
       map.set(r.moduleid, { value: r.moduleid, label: r.modulename });
     });
-    return Array.from(map.values()).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-  }, [lookups?.userProductsModules, task?.productid]);
+    const fromPerms = Array.from(map.values());
+    if (fromPerms.length) {
+      return fromPerms.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    }
+    // Fallback to the global modules for this product when the per-user
+    // permission list is empty/unavailable.
+    return (lookups?.modules || [])
+      .filter(m => (m.productid ?? m.productId) === task.productid)
+      .map(m => ({ value: m.moduleid ?? m.id, label: m.name ?? m.modulename }))
+      .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  }, [lookups?.userProductsModules, lookups?.modules, task?.productid]);
 
   /* "Can the user create any task at all?" — used to gate the Create
    * button in draft mode with a tooltip explaining why it's disabled. */
   const canCreate = useMemo(
-    () => (lookups?.userProductsModules || []).some(r => r.canwrite),
-    [lookups?.userProductsModules],
+    () => (lookups?.userProductsModules || []).some(r => r.canwrite)
+      || (lookups?.accessibleProducts?.length || 0) > 0,
+    [lookups?.userProductsModules, lookups?.accessibleProducts],
   );
 
   if (!taskId && !isDraft) return null;

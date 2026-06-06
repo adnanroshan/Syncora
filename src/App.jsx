@@ -157,8 +157,16 @@ export default function App({ user, hypermedia, isMock }) {
       if (map.has(r.productid)) return;
       map.set(r.productid, { id: r.productid, productid: r.productid, name: r.productname });
     });
-    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [userProductsModules]);
+    const fromPerms = Array.from(map.values());
+    if (fromPerms.length) {
+      return fromPerms.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+    // Fallback to the global products list when the per-user permission list
+    // is empty/unavailable (mirrors accessibleOrgs → lookups.orgs).
+    return (lookups.products || [])
+      .map(p => ({ id: p.id ?? p.productid, productid: p.id ?? p.productid, name: p.name }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [userProductsModules, lookups.products]);
 
   /* Single object passed to DetailPanel so its prop surface stays small. */
   const detailLookups = useMemo(() => ({

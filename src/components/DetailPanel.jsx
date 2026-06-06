@@ -328,7 +328,16 @@ export function DetailPanel({
   const mod   = task ? modulesById[task.moduleid]     : null;
   const group = task ? taskgroupsById[task.taskgroupid] : null;
   const status = task ? normaliseStatus(task.status) : null;
-  const assignee = task ? (usersById?.[task.createdbyuserid] || null) : null;
+  const usersByUsername = useMemo(() => {
+    const o = {};
+    (lookups?.users || []).forEach(u => { if (u?.username) o[u.username] = u; });
+    return o;
+  }, [lookups?.users]);
+  // The single "Assignee" field is the task's denormalized assignee
+  // (`usersusername`) — display and edit must read/write the SAME field.
+  const assignee = task?.usersusername
+    ? (usersByUsername[task.usersusername] || { username: task.usersusername })
+    : null;
 
   return (
     <>
@@ -546,7 +555,7 @@ export function DetailPanel({
                 />
               </SideField>
 
-              <SideField label="Assigner">
+              <SideField label="Assignee">
                 <FieldPickerButton
                   open={openPicker === 'assignee'}
                   onToggle={() => setOpenPicker(openPicker === 'assignee' ? null : 'assignee')}
@@ -560,8 +569,7 @@ export function DetailPanel({
                   options={[{ value: '', label: 'Unassigned' }, ...(lookups?.users || []).map(u => ({ value: u.username, label: u.username }))]}
                   onPick={(v) => {
                     setOpenPicker(null);
-                    if (!v) removeAssignee();
-                    else patch('usersusername', v);
+                    patch('usersusername', v || null);
                   }}
                   render={(opt) => <><Avatar name={opt.value || '·'} size={16}/><span>{opt.label}</span></>}
                 />

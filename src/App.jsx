@@ -328,6 +328,7 @@ export default function App({ user, hypermedia, isMock }) {
       productid:       null,
       moduleid:        null,
       createdbyuserid: me?.userid ?? null,
+      usersusername:   me?.username ?? null,
     });
   };
 

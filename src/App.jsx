@@ -94,7 +94,10 @@ export default function App({ user, hypermedia, isMock }) {
     const username = handle || matched?.username || user?.email || subId || null;
     return {
       username,
-      userid:   matched?.userid ?? subNum ?? meUserId ?? null,
+      // The token's `sub` IS the numeric userid in this backend — trust it
+      // over the fuzzy lookups match (which was resolving to admin/userid 1
+      // once the users list loaded, flipping me.userid 6 → 1).
+      userid:   subNum ?? matched?.userid ?? meUserId ?? null,
       name:     username || matched?.name || user.name,
       email:    user.email,
       picture:  user.picture,
@@ -119,17 +122,16 @@ export default function App({ user, hypermedia, isMock }) {
   /* Per-user access lists — fetched once `me.userid` is known. Reset when
    * the user changes (e.g. logout/re-login in the same tab). */
   useEffect(() => {
-    console.log('[DEBUG] access effect — me.userid =', me?.userid);   // TEMP
     if (me?.userid == null) { setUserOrgs([]); setUserProductsModules([]); return; }
     let cancelled = false;
     // Fetch independently — one failing call must not discard the other's
     // result (a failing /v2/userorgs was silently wiping the product list).
     api.listUserOrgs(me.userid)
-      .then(o => { console.log('[DEBUG] userOrgs rows:', o?.length, o); if (!cancelled) setUserOrgs(o || []); })   // TEMP
-      .catch(e => { console.error('[DEBUG] userOrgs FAILED', e); if (!cancelled) setUserOrgs([]); });               // TEMP
+      .then(o => { if (!cancelled) setUserOrgs(o || []); })
+      .catch(() => { if (!cancelled) setUserOrgs([]); });
     api.listUserProductsModules(me.userid)
-      .then(p => { console.log('[DEBUG] userProductsModules rows:', p?.length, p); if (!cancelled) setUserProductsModules(p || []); })  // TEMP
-      .catch(e => { console.error('[DEBUG] userProductsModules FAILED', e); if (!cancelled) setUserProductsModules([]); });             // TEMP
+      .then(p => { if (!cancelled) setUserProductsModules(p || []); })
+      .catch(() => { if (!cancelled) setUserProductsModules([]); });
     return () => { cancelled = true; };
   }, [me?.userid]);
 

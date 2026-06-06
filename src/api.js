@@ -87,8 +87,16 @@ export async function listUserOrgs(userid) {
 
 export async function listUserProductsModules(userid) {
   if (userid == null) return [];
-  const r = await restful({ url: `~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}` });
-  return r?.collection || [];
+  const url = `~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}`;
+  console.log('[DEBUG] listUserProductsModules → GET', url);   // TEMP
+  try {
+    const r = await restful({ url });
+    console.log('[DEBUG] listUserProductsModules → raw response', r, '| collection length:', r?.collection?.length);   // TEMP
+    return r?.collection || [];
+  } catch (err) {
+    console.error('[DEBUG] listUserProductsModules → request error', err);   // TEMP
+    throw err;
+  }
 }
 
 export async function listOrgAccessRows(organisationid) {

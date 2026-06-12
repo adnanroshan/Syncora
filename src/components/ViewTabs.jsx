@@ -73,10 +73,12 @@ export function ViewTabs({ view, onChange, counts, sortBy, onSort, groupBy, onGr
         />
         <span className="vt-divider"/>
         {view === 'grouped' && (
-          <button className="vt-btn" onClick={() => onGroup(groupBy === 'org' ? 'product' : 'org')}>
-            <Icon name="group" size={13} />
-            Group by {groupBy === 'org' ? 'client' : 'product'}
-          </button>
+          <GroupChip
+            value={groupBy}
+            open={openChip === 'group'}
+            onToggle={() => setOpenChip(openChip === 'group' ? null : 'group')}
+            onPick={(v) => { onGroup(v); setOpenChip(null); }}
+          />
         )}
         <button className="vt-btn" onClick={() => onSort(sortBy === 'due' ? 'priority' : 'due')}>
           <Icon name="sort" size={13} />
@@ -84,6 +86,41 @@ export function ViewTabs({ view, onChange, counts, sortBy, onSort, groupBy, onGr
         </button>
       </div>
     </div>
+  );
+}
+
+export const GROUP_OPTIONS = [
+  { value: 'taskgroup', label: 'Task group' },
+  { value: 'org',       label: 'Client'     },
+  { value: 'product',   label: 'Product'    },
+  { value: 'module',    label: 'Module'     },
+];
+
+/* Like FilterChip, but it's a view setting — always has a value, no clear. */
+function GroupChip({ value, open, onToggle, onPick }) {
+  const current = GROUP_OPTIONS.find(o => o.value === value) || GROUP_OPTIONS[1];
+  return (
+    <span className="fchip-wrap">
+      <button className={`fchip ${open ? 'is-open' : ''}`} onClick={onToggle}>
+        <Icon name="group" size={12}/>
+        <span className="fchip-label">Group by</span>
+        <span className="fchip-value">{current.label}</span>
+        <Icon name="chevron-d" size={10}/>
+      </button>
+      {open && (
+        <div className="fchip-pop" role="listbox">
+          {GROUP_OPTIONS.map(opt => (
+            <button key={opt.value}
+              role="option" aria-selected={value === opt.value}
+              className={`fchip-popitem ${value === opt.value ? 'is-selected' : ''}`}
+              onClick={() => onPick(opt.value)}>
+              <span>{opt.label}</span>
+              {value === opt.value && <Icon name="check" size={12}/>}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 

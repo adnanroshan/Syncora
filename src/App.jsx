@@ -71,6 +71,7 @@ export default function App({ user, hypermedia, isMock }) {
   /* ------- indexes ------- */
   const orgsById     = useMemo(() => indexBy(lookups.orgs,     o => o.id ?? o.organisationid), [lookups.orgs]);
   const productsById = useMemo(() => indexBy(lookups.products, p => p.id ?? p.productid),      [lookups.products]);
+  const modulesById  = useMemo(() => indexBy(lookups.modules,  m => m.id ?? m.moduleid),       [lookups.modules]);
 
   /* ------- current user — derived from id_token, joined to the backend
    * users table so we know the numeric `userid` to write as createdbyuserid. */
@@ -191,7 +192,10 @@ export default function App({ user, hypermedia, isMock }) {
   }, [unreadRows]);
 
   /* Decorate every task with its actual primary assignee (from taskassignees),
-   * falling back to the existing assignee field or the creator. */
+   * falling back to the existing assignee field or the creator. The module
+   * name is resolved from the modules lookup by moduleid — the denormalized
+   * `modulename` column on the /v2/tasks row can be stale/wrong, and the
+   * detail panel already resolves it this way; keep the list consistent. */
   const decoratedTasks = useMemo(
     () => tasks.map(t => {
       const rows = assigneesByTask[t.taskid] || [];
@@ -199,10 +203,11 @@ export default function App({ user, hypermedia, isMock }) {
       const primaryUser = primary ? usersById[primary.assigneduserid] : null;
       return {
         ...t,
+        modulename: modulesById[t.moduleid]?.name || t.modulename,
         assignee: primaryUser || t.assignee || usersById[t.createdbyuserid] || null,
       };
     }),
-    [tasks, usersById, assigneesByTask],
+    [tasks, usersById, assigneesByTask, modulesById],
   );
 
   /* Refresh per-task unread counts (called on app load + when the detail
@@ -409,6 +414,7 @@ export default function App({ user, hypermedia, isMock }) {
           onToggleTheme={() => setPrefs({ theme: prefs.theme === 'dark' ? 'light' : 'dark' })}
           user={me}
           onLogout={logout}
+          onOpenTask={(taskid) => { setDraftTask(null); setSelectedId(taskid); }}
         />
         <ViewTabs
           view={view} onChange={setView}

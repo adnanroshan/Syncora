@@ -157,6 +157,25 @@ export async function listMyUnread() {
 }
 
 /* ------------------------------------------------------------ *
+ * Notifications                                                  *
+ * ------------------------------------------------------------ */
+
+export async function listNotifications(userid) {
+  if (userid == null) return [];
+  const r = await restful({ url: `~/v2/notifications?filter=(userid%3D${encodeURIComponent(userid)})` });
+  return r?.collection || [];
+}
+
+export async function markNotificationRead(n) {
+  const url = n?._links?.self?.href || `~/v2/notifications/${encodeURIComponent(n.notificationid)}`;
+  return restful({
+    method: 'PATCH',
+    url,
+    body: { isread: true, readdate: new Date().toISOString() },
+  });
+}
+
+/* ------------------------------------------------------------ *
  * Activity & Discussion                                          *
  * ------------------------------------------------------------ */
 
@@ -314,6 +333,26 @@ const MOCK = {
   taskMessageReactions: (SEED.taskMessageReactions || []).slice(),
   taskMessageMentions:  (SEED.taskMessageMentions || []).slice(),
   taskMessageReads:     (SEED.taskMessageReads || []).slice(),
+  // Mock notifications for the seed "me" user (userid 8) — mirrors the
+  // /v2/notifications row shape from the real backend.
+  notifications: [
+    {
+      notificationid: 1, userid: 8, notificationtype: 'Task Completion',
+      title: 'Task completed', body: 'This task has been completed',
+      taskid: SEED.tasks[0]?.taskid ?? null, taskTitle: SEED.tasks[0]?.title ?? null,
+      messageid: null, messageMessagetext: null,
+      isread: false, readdate: null,
+      creationdate: new Date(Date.now() - 35 * 60 * 1000).toISOString(),
+    },
+    {
+      notificationid: 2, userid: 8, notificationtype: 'Mention',
+      title: 'You were mentioned', body: 'Check the discussion when you get a minute',
+      taskid: SEED.tasks[1]?.taskid ?? null, taskTitle: SEED.tasks[1]?.title ?? null,
+      messageid: null, messageMessagetext: null,
+      isread: true, readdate: new Date(Date.now() - 80 * 60 * 1000).toISOString(),
+      creationdate: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
+    },
+  ],
   nextId:               Math.max(...SEED.tasks.map(t => t.taskid)) + 1,
   nextMessageId:        Math.max(0, ...((SEED.taskMessages || []).map(m => m.messageid))) + 1,
   nextActivityId:       Math.max(0, ...((SEED.taskActivity || []).map(a => a.activityid))) + 1,
@@ -618,6 +657,28 @@ function handleMock({ method = 'GET', url, body } = {}) {
       byTask.set(m.taskid, cur);
     }
     return { collection: Array.from(byTask.values()) };
+  }
+
+  /* ---------- Notifications ---------- */
+  if (method === 'GET' && path === '/v2/notifications') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/userid=(\d+)/);
+    let rows = MOCK.notifications;
+    if (m) rows = rows.filter(n => n.userid === parseInt(m[1], 10));
+    rows = [...rows].sort((a, b) => new Date(b.creationdate) - new Date(a.creationdate));
+    return {
+      collection: rows.map(n => ({
+        ...n,
+        _links: { self: { href: `~/v2/notifications/${n.notificationid}` } },
+      })),
+    };
+  }
+  if (method === 'PATCH' && path.startsWith('/v2/notifications/')) {
+    const id = parseInt(path.split('/').pop(), 10);
+    const i  = MOCK.notifications.findIndex(n => n.notificationid === id);
+    if (i < 0) throw mkError(404, 'not_found', 'Notification not found');
+    MOCK.notifications[i] = { ...MOCK.notifications[i], ...body };
+    return MOCK.notifications[i];
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {

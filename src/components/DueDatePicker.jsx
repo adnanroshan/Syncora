@@ -22,6 +22,7 @@
  */
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from './Icons.jsx';
 import { DueChip } from './Shared.jsx';
 
@@ -102,11 +103,14 @@ export function DueDatePicker({ value, onChange, allowPast = false }) {
     };
   }, [open, reposition]);
 
-  /* Close on outside click + Escape. */
+  /* Close on outside click + Escape. The popover is portaled to
+   * document.body, so check both the trigger root and the popover. */
   useEffect(() => {
     if (!open) return;
     const onDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+      if (rootRef.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDown);
@@ -210,7 +214,10 @@ export function DueDatePicker({ value, onChange, allowPast = false }) {
         {validCurrent && <DueChip iso={value}/>}
       </button>
 
-      {open && (
+      {/* Portaled to <body> so the popover can never be trapped under the
+        * detail panel's stacking context (it was hiding behind the form
+        * when an ancestor had a transform/animation). */}
+      {open && createPortal(
         <div className="ddp-pop" ref={popRef} style={popStyle} role="dialog" aria-label="Due date">
           {/* Quick picks */}
           <div className="ddp-quick">
@@ -307,7 +314,8 @@ export function DueDatePicker({ value, onChange, allowPast = false }) {
               onClick={() => setOpen(false)}
             >Done</button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

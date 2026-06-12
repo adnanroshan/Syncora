@@ -7,9 +7,15 @@
  */
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import * as api from './api.js';
 import { logout } from './auth.js';
+import { qk } from './queryKeys.js';
+import {
+  useTasks, useLookups, useAllAssignees, useUnread,
+  useUserOrgs, useUserProductsModules,
+} from './hooks/queries.js';
 import { ACT, NOTIF, logActivity, notifyTaskAudience, addManagersAsWatchers } from './notify.js';
 import { ToastHost } from './components/Notifications.jsx';
 import { Sidebar }     from './components/Sidebar.jsx';
@@ -22,6 +28,10 @@ import { CalendarView } from './views/CalendarView.jsx';
 import { GroupedView }  from './views/GroupedView.jsx';
 import { normaliseStatus, isToday } from './components/Shared.jsx';
 import { usePreferences } from './preferences.js';
+
+/* Stable empty defaults so a loading query doesn't churn referential identity. */
+const EMPTY_ARR = [];
+const EMPTY_LOOKUPS = { orgs: [], products: [], modules: [], taskgroups: [], users: [] };
 
 export default function App({ user, hypermedia, isMock }) {
   const [prefs, setPrefs] = usePreferences();
@@ -40,13 +50,17 @@ export default function App({ user, hypermedia, isMock }) {
   // Live notification popups.
   const [toasts, setToasts] = useState([]);
 
-  /* ------- data ------- */
-  const [tasks, setTasks]     = useState([]);
-  const [lookups, setLookups] = useState({ orgs: [], products: [], modules: [], taskgroups: [], users: [] });
-  const [allAssignees, setAllAssignees] = useState([]);
-  const [unreadRows, setUnreadRows] = useState([]);
-  const [loading, setLoad]    = useState(true);
-  const [error, setError]     = useState(null);
+  /* ------- data (TanStack Query — cache + background revalidation) ------- */
+  const queryClient = useQueryClient();
+  const tasksQ     = useTasks();
+  const lookupsQ   = useLookups();
+  const assigneesQ = useAllAssignees();
+
+  const tasks        = tasksQ.data || EMPTY_ARR;
+  const lookups      = lookupsQ.data || EMPTY_LOOKUPS;
+  const allAssignees = assigneesQ.data || EMPTY_ARR;
+  const loading      = tasksQ.isLoading || lookupsQ.isLoading;
+  const error        = tasksQ.error ? prettyErr(tasksQ.error) : null;
   const [creating, setCreating] = useState(false);
   // Logged-in user's `userid` from the backend (used for createdbyuserid on
   // task POST/PATCH). Resolved lazily via /v2/users?filter=(username='…').
@@ -54,26 +68,6 @@ export default function App({ user, hypermedia, isMock }) {
   // In-memory draft for "New task". When non-null, the DetailPanel renders
   // in unsaved mode — no GET/PATCH calls. POST only fires on Create click.
   const [draftTask, setDraftTask] = useState(null);
-  // Per-user access lists. Empty until me.userid resolves. Drives the
-  // Sidebar's Clients section and the Client/Product/Module pickers.
-  const [userOrgs, setUserOrgs] = useState([]);
-  const [userProductsModules, setUserProductsModules] = useState([]);
-
-  const reload = useCallback(async () => {
-    setLoad(true); setError(null);
-    try {
-      const { tasks, lookups, assignees } = await api.loadEverything();
-      setTasks(tasks);
-      setLookups(lookups);
-      setAllAssignees(assignees || []);
-    } catch (err) {
-      setError(prettyErr(err));
-    } finally {
-      setLoad(false);
-    }
-  }, []);
-
-  useEffect(() => { reload(); }, [reload]);
 
   /* ------- indexes ------- */
   const orgsById     = useMemo(() => indexBy(lookups.orgs,     o => o.id ?? o.organisationid), [lookups.orgs]);
@@ -127,21 +121,22 @@ export default function App({ user, hypermedia, isMock }) {
     return () => { cancelled = true; };
   }, [isMock, me?.username, me?.userid]);
 
-  /* Per-user access lists — fetched once `me.userid` is known. Reset when
-   * the user changes (e.g. logout/re-login in the same tab). */
-  useEffect(() => {
-    if (me?.userid == null) { setUserOrgs([]); setUserProductsModules([]); return; }
-    let cancelled = false;
-    // Fetch independently — one failing call must not discard the other's
-    // result (a failing /v2/userorgs was silently wiping the product list).
-    api.listUserOrgs(me.userid)
-      .then(o => { if (!cancelled) setUserOrgs(o || []); })
-      .catch(() => { if (!cancelled) setUserOrgs([]); });
-    api.listUserProductsModules(me.userid)
-      .then(p => { if (!cancelled) setUserProductsModules(p || []); })
-      .catch(() => { if (!cancelled) setUserProductsModules([]); });
-    return () => { cancelled = true; };
-  }, [me?.userid]);
+  /* Per-user access lists — cached per userid (independent queries, so one
+   * failing call can't wipe the other's rows). */
+  const userOrgsQ            = useUserOrgs(me?.userid);
+  const userProductsModulesQ = useUserProductsModules(me?.userid);
+  const userOrgs             = userOrgsQ.data || EMPTY_ARR;
+  const userProductsModules  = userProductsModulesQ.data || EMPTY_ARR;
+
+  /* Per-task unread counts: polled app-wide (visibility-gated) so badges
+   * update without reselecting a task. Invalidated when the panel closes
+   * so badges clear for a task you just read. */
+  const unreadQ = useUnread(me?.userid != null);
+  const unreadRows = unreadQ.data || EMPTY_ARR;
+  const refreshUnread = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: qk.unread() });
+  }, [queryClient]);
+
 
   /* Index users by id so tasks can show the assignee's name/avatar. */
   const usersById = useMemo(() => indexBy(lookups.users, u => u.userid), [lookups.users]);
@@ -239,19 +234,6 @@ export default function App({ user, hypermedia, isMock }) {
     [tasks, usersById, usersByUsername, assigneesByTask, modulesById],
   );
 
-  /* Refresh per-task unread counts (called on app load + when the detail
-   * panel closes so badges clear for a task you just read). Backend scopes
-   * to the logged-in user from auth context — no userid in the URL. */
-  const refreshUnread = useCallback(async () => {
-    if (me?.userid == null) { setUnreadRows([]); return; }
-    try {
-      const rows = await api.listMyUnread();
-      setUnreadRows(rows || []);
-    } catch { /* swallow */ }
-  }, [me?.userid]);
-
-  useEffect(() => { refreshUnread(); }, [refreshUnread, tasks]);
-
   /* Tab title prefix: (@1·4) / (7) / (@2) / nothing. */
   useEffect(() => {
     const totalUnread = unreadRows.reduce((n, r) => n + (r.unreadCount || 0), 0);
@@ -327,14 +309,19 @@ export default function App({ user, hypermedia, isMock }) {
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [decoratedTasks, usersById]);
 
-  /* ------- mutations ------- */
+  /* ------- mutations (optimistic cache writes + background revalidate) ------- */
   const onAfterPatch = useCallback((updatedTask) => {
-    setTasks(prev => prev.map(t => t.taskid === updatedTask.taskid ? { ...t, ...updatedTask } : t));
-  }, []);
+    queryClient.setQueryData(qk.tasks(), (prev = []) =>
+      prev.map(t => t.taskid === updatedTask.taskid ? { ...t, ...updatedTask } : t));
+    queryClient.setQueryData(qk.task(updatedTask.taskid), (prev) =>
+      prev ? { ...prev, ...updatedTask } : prev);
+  }, [queryClient]);
 
   const onAfterDelete = useCallback((deletedTask) => {
-    setTasks(prev => prev.filter(t => t.taskid !== deletedTask.taskid));
-  }, []);
+    queryClient.setQueryData(qk.tasks(), (prev = []) =>
+      prev.filter(t => t.taskid !== deletedTask.taskid));
+    queryClient.removeQueries({ queryKey: qk.task(deletedTask.taskid) });
+  }, [queryClient]);
 
   /* Open a task from a notification or toast — optionally focusing a
    * specific message in its discussion. */
@@ -393,7 +380,7 @@ export default function App({ user, hypermedia, isMock }) {
     try {
       const created = await api.createTask(draft);
       const decorated = { ...created, assignee: usersById[created.createdbyuserid] || null };
-      setTasks(prev => [decorated, ...prev]);
+      queryClient.setQueryData(qk.tasks(), (prev = []) => [decorated, ...prev]);
       setDraftTask(null);
       setSelectedId(decorated.taskid);
 
@@ -425,7 +412,7 @@ export default function App({ user, hypermedia, isMock }) {
     } finally {
       setCreating(false);
     }
-  }, [creating, usersById, me]);
+  }, [creating, usersById, me, queryClient]);
 
   /* ------- keyboard shortcuts ------- */
   useEffect(() => {

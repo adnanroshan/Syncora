@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import App from './App.jsx';
 import { bootstrap, login, AuthState } from './auth.js';
@@ -7,6 +8,24 @@ import { IS_MOCK } from './config.js';
 import { LoginScreen, BootSplash, BootError } from './components/LoginScreen.jsx';
 
 import './styles.css';
+
+/* One client for the app. Defaults tuned for ~100 concurrent users:
+ * generous staleTime so navigation hits the cache instead of the
+ * backend, and no retries on 4xx (api.js errors carry numeric .code). */
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: true,
+      retry: (count, err) => {
+        const code = err?.code;
+        if (typeof code === 'number' && code >= 400 && code < 500) return false;
+        return count < 2;
+      },
+    },
+  },
+});
 
 function Boot() {
   const [auth, setAuth] = useState({ state: AuthState.Loading });
@@ -31,6 +50,8 @@ function Boot() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Boot/>
+    <QueryClientProvider client={queryClient}>
+      <Boot/>
+    </QueryClientProvider>
   </React.StrictMode>
 );

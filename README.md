@@ -184,6 +184,30 @@ If the SPA is at `tasks.example.com` and the backend at `app.example.com`:
 
 ---
 
+## Data layer (TanStack Query)
+
+All server data flows through TanStack Query (`src/hooks/queries.js`,
+keys in `src/queryKeys.js`). Tuned for many concurrent users:
+
+| Data | staleTime | Poll (visible tab only) |
+|---|---|---|
+| Tasks list | 15s | — |
+| Lookups (orgs/products/modules/groups/users) | 5 min | — |
+| Per-user access lists | 5 min | — |
+| Unread counts | 5s | 20s |
+| Notifications (bell + toasts) | 5s | 20s |
+| Open task: messages / reactions | 1s | 4s |
+| Open task: activity | 4s | 10s |
+| Open task: attachments | 1s | 5s |
+
+Navigation is served from cache (instant task reopen), identical requests
+are deduplicated, polling pauses when the tab is backgrounded and while a
+mutation is in flight, and mutations write optimistically into the cache
+with rollback on error. Messages sent by other users appear in an open
+discussion within ~4s.
+
+---
+
 ## Token storage & security
 
 | What | Where | Why |

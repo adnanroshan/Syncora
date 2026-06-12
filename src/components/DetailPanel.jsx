@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Icon, StatusGlyph } from './Icons.jsx';
 import {
   Avatar, OrgMark, PriorityMark, DueChip,
@@ -34,6 +35,10 @@ import {
   ACT, NOTIF, logActivity, notifyUsers, notifyTaskAudience,
   addManagersAsWatchers,
 } from '../notify.js';
+import { qk } from '../queryKeys.js';
+import { useActivity, useAttachments } from '../hooks/queries.js';
+
+const EMPTY_ATTS = [];
 
 export function DetailPanel({
   taskId, draftTask, creating,
@@ -50,22 +55,36 @@ export function DetailPanel({
   const [openPicker, setOpenPicker] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  /* ---- attachments ---- */
-  const [attachments, setAttachments] = useState([]);
+  /* ---- attachments (query cache + in-flight upload overlay) ---- */
+  const queryClient = useQueryClient();
   const [lightbox, setLightbox] = useState(null);          // { index } | null
   const [attView, setAttView] = usePref('attachmentsView', 'grid');
   const [jumpRequest, setJumpRequest] = useState(null);    // { messageid, nonce }
+  const [pendingUploads, setPendingUploads] = useState([]); // uploading/failed optimistic rows
   const resolver = api.fetchAttachmentBlobUrl;
 
-  /* Load task attachments whenever a saved task is shown. */
+  const attachmentsQ = useAttachments(taskId, {
+    enabled: !isDraft && taskId != null,
+    paused: pendingUploads.length > 0,
+  });
+  const serverAtts = attachmentsQ.data || EMPTY_ATTS;
+
+  /* Merge server rows with in-flight uploads (deduped by attachmentid — the
+   * client-generated UUID is reused as the persisted id, so a row that lands
+   * in the polled cache supersedes its pending entry). */
+  const attachments = useMemo(() => {
+    const serverIds = new Set(serverAtts.map(a => a.attachmentid));
+    return [...serverAtts, ...pendingUploads.filter(p => !serverIds.has(p.attachmentid))];
+  }, [serverAtts, pendingUploads]);
+
+  /* Reset in-flight uploads when switching tasks. */
+  useEffect(() => { setPendingUploads([]); }, [taskId]);
+
+  /* Deep-link from a notification/toast: route the requested message
+   * through the same jump mechanism the attachment badges use. */
   useEffect(() => {
-    if (isDraft || taskId == null) { setAttachments([]); return; }
-    let cancelled = false;
-    api.listAttachments(taskId)
-      .then(rows => { if (!cancelled) setAttachments(rows); })
-      .catch(() => { if (!cancelled) setAttachments([]); });
-    return () => { cancelled = true; };
-  }, [taskId, isDraft, api]);
+    if (focusMessageId != null) setJumpRequest({ messageid: focusMessageId, nonce: Date.now() });
+  }, [focusMessageId, taskId]);
 
   /* All task images (task- AND message-sourced), oldest→newest, for the
    * lightbox to walk as one list. Failed optimistic rows are excluded. */
@@ -99,38 +118,43 @@ export function DetailPanel({
       };
       return { id, file, optimistic };
     });
-    setAttachments(prev => [...prev, ...jobs.map(j => j.optimistic)]);
+    setPendingUploads(prev => [...prev, ...jobs.map(j => j.optimistic)]);
 
     await Promise.all(jobs.map(async ({ id, file, optimistic }) => {
       try {
         const saved = await api.createAttachment({
           taskid: tid, messageid: messageid ?? null, uploadedbyuserid: uploaderId,
           file, attachmentid: id,
-          onProgress: (p) => setAttachments(prev => prev.map(a => a.attachmentid === id ? { ...a, progress: p } : a)),
+          onProgress: (p) => setPendingUploads(prev => prev.map(a => a.attachmentid === id ? { ...a, progress: p } : a)),
         });
-        setAttachments(prev => prev.map(a => a.attachmentid === id
-          ? { ...saved, url: optimistic.url || saved.url, status: 'done' }
-          : a));
+        queryClient.setQueryData(qk.attachments(tid), (prev = []) =>
+          prev.some(a => a.attachmentid === id) ? prev : [...prev, { ...saved, url: optimistic.url || saved.url }]);
+        setPendingUploads(prev => prev.filter(a => a.attachmentid !== id));
       } catch {
-        setAttachments(prev => prev.map(a => a.attachmentid === id ? { ...a, status: 'failed' } : a));
+        setPendingUploads(prev => prev.map(a => a.attachmentid === id ? { ...a, status: 'failed' } : a));
       }
     }));
   };
 
   const retryAtt = (a) => {
     if (!a?._file) return;
-    setAttachments(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
+    setPendingUploads(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
     addFiles([a._file], a.messageid ?? null);
   };
 
   const deleteAtt = async (a) => {
-    const before = attachments;
-    setAttachments(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
-    if (a.status === 'failed') return;        // never persisted — local removal only
+    // In-flight / failed rows were never persisted — drop them locally.
+    if (a.status === 'uploading' || a.status === 'failed') {
+      setPendingUploads(prev => prev.filter(x => x.attachmentid !== a.attachmentid));
+      return;
+    }
+    const key = qk.attachments(task.taskid);
+    const snapshot = queryClient.getQueryData(key);
+    queryClient.setQueryData(key, (list = []) => list.filter(x => x.attachmentid !== a.attachmentid));
     try {
       await api.deleteAttachment(a.attachmentid);
     } catch (err) {
-      setAttachments(before);
+      if (snapshot) queryClient.setQueryData(key, snapshot);
       alert('Could not delete attachment: ' + prettyErr(err));
     }
   };
@@ -151,18 +175,25 @@ export function DetailPanel({
     setLoad(false);
   }, [isDraft, draftTask]);
 
-  /* In saved mode, fetch the full task whenever the ID changes. */
+  /* In saved mode, fetch the full task whenever the ID changes. The query
+   * cache seeds the panel instantly on reopen; a background fetch then
+   * refreshes both local state and the cache. */
   useEffect(() => {
     if (isDraft) return;
     if (!taskId) { setTask(null); return; }
     let cancelled = false;
-    setLoad(true); setError(null);
+    const cached = queryClient.getQueryData(qk.task(taskId));
+    if (cached) { setTask(cached); setTitleDraft(cached.title || ''); setEditingTitle(false); }
+    setLoad(!cached); setError(null);
     api.getTask(taskId)
-      .then(t => { if (!cancelled) { setTask(t); setTitleDraft(t.title || ''); setEditingTitle(false); } })
-      .catch(err => { if (!cancelled) setError(prettyErr(err)); })
+      .then(t => {
+        queryClient.setQueryData(qk.task(taskId), t);
+        if (!cancelled) { setTask(t); setTitleDraft(t.title || ''); setEditingTitle(false); }
+      })
+      .catch(err => { if (!cancelled && !cached) setError(prettyErr(err)); })
       .finally(() => { if (!cancelled) setLoad(false); });
     return () => { cancelled = true; };
-  }, [taskId, api, isDraft]);
+  }, [taskId, api, isDraft, queryClient]);
 
   /* Close the More menu on outside click / Escape. */
   useEffect(() => {
@@ -195,18 +226,11 @@ export function DetailPanel({
   }, [lookups?.users]);
 
   /* Activity rows for this task — drive the completion / verification
-   * banner. Re-fetched when `eventsVersion` bumps after a local write. */
-  const [events, setEvents] = useState([]);
-  const [eventsVersion, setEventsVersion] = useState(0);
-  const bumpEvents = () => setEventsVersion(v => v + 1);
-  useEffect(() => {
-    if (isDraft || !taskId) { setEvents([]); return; }
-    let cancelled = false;
-    api.listActivity(taskId)
-      .then(rows => { if (!cancelled) setEvents(rows || []); })
-      .catch(() => { if (!cancelled) setEvents([]); });
-    return () => { cancelled = true; };
-  }, [api, taskId, isDraft, eventsVersion]);
+   * banner. Polled (10s, visibility-gated) so other users' completions
+   * and verifications appear live; invalidated after local writes. */
+  const activityQ = useActivity(taskId, { enabled: !isDraft && taskId != null });
+  const events = activityQ.data || EMPTY_ATTS;
+  const bumpEvents = () => queryClient.invalidateQueries({ queryKey: qk.activity(taskId) });
 
   /* Rows come back newest-first. Completion = most recent 'Completed';
    * verifications = distinct verifiers SINCE that completion (a reopened
@@ -575,8 +599,6 @@ export function DetailPanel({
                     usersById={usersById}
                     lookups={lookups}
                     api={api}
-                    refreshKey={eventsVersion}
-                    focusMessageId={focusMessageId}
                     attachments={attachments}
                     onOpenImage={openImage}
                     resolver={resolver}

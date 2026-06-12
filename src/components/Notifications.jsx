@@ -6,52 +6,43 @@
  * it points at a task, opens that task's detail panel.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import * as api from '../api.js';
+import { qk } from '../queryKeys.js';
+import { useNotifications } from '../hooks/queries.js';
 import { Icon } from './Icons.jsx';
-
-const POLL_MS = 20 * 1000;
 
 export function NotificationsBell({ userid, onOpenTask, onIncoming }) {
   const [open, setOpen]   = useState(false);
-  const [items, setItems] = useState([]);
   const rootRef = useRef(null);
-  // Bumped on every refresh AND on optimistic updates, so an in-flight
-  // fetch that resolves late can't clobber newer state with stale rows.
-  const seqRef = useRef(0);
+  const queryClient = useQueryClient();
   // High-water mark for live toasts: null until the first load completes
   // so a fresh session doesn't toast the whole backlog.
   const lastSeenRef = useRef(null);
 
-  const refresh = useCallback(async () => {
-    if (userid == null) { setItems([]); return; }
-    const seq = ++seqRef.current;
-    try {
-      const rows = await api.listNotifications(userid);
-      if (seq !== seqRef.current) return; // superseded
-      rows.sort((a, b) => new Date(b.creationdate) - new Date(a.creationdate));
-      setItems(rows);
+  /* One shared query app-wide: cache + 20s visibility-gated poll. */
+  const notifQ = useNotifications(userid);
+  const items = notifQ.data || [];
 
-      const maxId = rows.reduce((m, r) => Math.max(m, r.notificationid || 0), 0);
-      if (lastSeenRef.current == null) {
-        lastSeenRef.current = maxId;
-      } else if (maxId > lastSeenRef.current) {
-        const fresh = rows.filter(r => r.notificationid > lastSeenRef.current && !r.isread);
-        lastSeenRef.current = maxId;
-        if (fresh.length) onIncoming?.(fresh);
-      }
-    } catch { /* swallow — the bell just stays empty */ }
-  }, [userid, onIncoming]);
-
-  /* Initial load + background poll. */
+  /* Detect newly-arrived unread rows → surface as live toasts. */
   useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, POLL_MS);
-    return () => clearInterval(t);
-  }, [refresh]);
+    if (!notifQ.data) return;
+    const rows = notifQ.data;
+    const maxId = rows.reduce((m, r) => Math.max(m, r.notificationid || 0), 0);
+    if (lastSeenRef.current == null) {
+      lastSeenRef.current = maxId;
+    } else if (maxId > lastSeenRef.current) {
+      const fresh = rows.filter(r => r.notificationid > lastSeenRef.current && !r.isread);
+      lastSeenRef.current = maxId;
+      if (fresh.length) onIncoming?.(fresh);
+    }
+  }, [notifQ.data, onIncoming]);
 
-  /* Re-fetch on open so the panel is always current. */
-  useEffect(() => { if (open) refresh(); }, [open, refresh]);
+  /* Re-validate on open so the panel is always current. */
+  useEffect(() => {
+    if (open) queryClient.invalidateQueries({ queryKey: qk.notifications(userid) });
+  }, [open, queryClient, userid]);
 
   /* Close on outside click + Escape. */
   useEffect(() => {
@@ -70,8 +61,8 @@ export function NotificationsBell({ userid, onOpenTask, onIncoming }) {
 
   const markRead = async (n) => {
     if (n.isread) return;
-    seqRef.current++; // invalidate any in-flight refresh
-    setItems(prev => prev.map(x => x.notificationid === n.notificationid ? { ...x, isread: true } : x));
+    queryClient.setQueryData(qk.notifications(userid), (prev = []) =>
+      prev.map(x => x.notificationid === n.notificationid ? { ...x, isread: true } : x));
     try { await api.markNotificationRead(n); } catch { /* keep optimistic state */ }
   };
 

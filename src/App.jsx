@@ -458,6 +458,8 @@ export default function App({ user, hypermedia, isMock }) {
         api={api}
         onAfterPatch={onAfterPatch}
         onAfterDelete={onAfterDelete}
+        panelMode={prefs.panelMode}
+        onPanelMode={(m) => setPrefs({ panelMode: m })}
       />
     </div>
   );

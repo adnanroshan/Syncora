@@ -10,6 +10,8 @@ const DEFAULTS = {
   density:  'compact',
   accent:   '#0F6E56',
   sidebarCollapsed: false,
+  /* Task detail layout: 'side' (right rail) or 'center' (floating modal). */
+  panelMode: 'side',
 };
 
 const ACCENT_BG = {

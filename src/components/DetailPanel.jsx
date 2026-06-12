@@ -22,6 +22,7 @@ export function DetailPanel({
   taskId, draftTask, creating,
   onClose, onNavigate, onDiscardDraft, onCommitDraft,
   allTasks, lookups, usersById, currentUser, api, onAfterPatch, onAfterDelete,
+  panelMode = 'side', onPanelMode,
 }) {
   const isDraft = !!draftTask;
   const [task, setTask]     = useState(null);
@@ -188,7 +189,11 @@ export function DetailPanel({
   return (
     <>
       <div className="detail-scrim" onClick={handleClose}/>
-      <aside className="detail" role="dialog" aria-label={task?.title || (isDraft ? 'New task' : 'Task')}>
+      <aside
+        className={`detail ${panelMode === 'center' ? 'detail--center' : ''}`}
+        role="dialog"
+        aria-label={task?.title || (isDraft ? 'New task' : 'Task')}
+      >
         <header className="detail-head">
           <div className="detail-head-left">
             <button
@@ -206,15 +211,19 @@ export function DetailPanel({
           </div>
           <div className="detail-head-right">
             {isDraft ? (
-              <button
-                className="btn-primary"
-                onClick={onCreateClick}
-                disabled={creating || !task?.title?.trim() || !canCreate}
-                title={!canCreate ? "You don't have permission to create tasks" : 'Create task'}
-              >
-                <Icon name="plus" size={13}/>
-                <span>{creating ? 'Creating…' : 'Create'}</span>
-              </button>
+              <>
+                <PanelModeToggle mode={panelMode} onChange={onPanelMode}/>
+                <span className="detail-divider"/>
+                <button
+                  className="btn-primary"
+                  onClick={onCreateClick}
+                  disabled={creating || !task?.title?.trim() || !canCreate}
+                  title={!canCreate ? "You don't have permission to create tasks" : 'Create task'}
+                >
+                  <Icon name="plus" size={13}/>
+                  <span>{creating ? 'Creating…' : 'Create'}</span>
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -235,6 +244,8 @@ export function DetailPanel({
                 >
                   <Icon name="chevron-r" size={15}/>
                 </button>
+                <span className="detail-divider"/>
+                <PanelModeToggle mode={panelMode} onChange={onPanelMode}/>
                 <span className="detail-divider"/>
                 <div className="detail-menu-wrap" style={{ position: 'relative' }}>
                   <button
@@ -584,6 +595,33 @@ function FieldPickerButton({ open, onToggle, current, options, onPick, render, d
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- panel layout toggle (side rail ⟷ centered modal) ---------- */
+function PanelModeToggle({ mode, onChange }) {
+  if (!onChange) return null;
+  return (
+    <div className="panelmode" role="group" aria-label="Panel layout">
+      <button
+        type="button"
+        className={`iconbtn ${mode !== 'center' ? 'is-active' : ''}`}
+        onClick={() => onChange('side')}
+        aria-pressed={mode !== 'center'}
+        title="Side panel"
+      >
+        <Icon name="panel-side" size={15}/>
+      </button>
+      <button
+        type="button"
+        className={`iconbtn ${mode === 'center' ? 'is-active' : ''}`}
+        onClick={() => onChange('center')}
+        aria-pressed={mode === 'center'}
+        title="Center panel"
+      >
+        <Icon name="panel-center" size={15}/>
+      </button>
     </div>
   );
 }

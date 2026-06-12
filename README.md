@@ -96,12 +96,13 @@ If the redirect URI in step 2 doesn't match the actual URL (down to the trailing
 |---|---|---|
 | App starts | `src/main.jsx` | `Boot` component calls `bootstrap()` and shows the right screen for each auth state. |
 | Loading | `src/auth.js` → `loadRestfulScript()` | Dynamically loads `https://<backend>/v2/js/restful-2.0.1.js`. |
-| Configure | `bootstrap()` | Calls `$app.restful({ config: { clientId, token: <callback> }})` — the callback persists tokens to `sessionStorage`. |
+| Configure | `bootstrap()` | Calls `$app.restful({ config: { clientId, token: <callback> }})` — the callback persists tokens to `localStorage` (stamped with an absolute `expires_at`). |
 | User clicks Sign in | `src/components/LoginScreen.jsx` → `login()` | POST `/oauth2/v2/auth/pkce` → save `loginRequest` → redirect to authorize URL. |
 | User authenticates | Backend UI | Login + consent screens shown by Code On Time. |
 | Redirect back | URL has `#auth` | `bootstrap()` detects the hash, validates `state`, POSTs to `/oauth2/v2/token` with `code_verifier`, saves the token, fetches `/v2` hypermedia for ACL. |
 | Authenticated UI | `src/App.jsx` | Receives `user` (decoded id_token) + `hypermedia` as props. |
-| API calls | `src/api.js` | Every request goes through `$app.restful` which auto-attaches the Bearer token and silently refreshes via `refresh_token` when it nears expiry. |
+| API calls | `src/api.js` | Every request goes through `$app.restful` which auto-attaches the Bearer token. A 401 triggers one silent `refresh_token` renewal + retry before any error surfaces. |
+| Session keep-alive | `src/auth.js` | A timer renews the access token ~2 min before `expires_at`; returning to a backgrounded tab triggers an immediate renewal check. Only a rejected `refresh_token` logs the user out. |
 | Logout | `src/auth.js` → `logout()` | POST `/oauth2/v2/revoke` with `client_id` + `refresh_token` → clear session → reload. |
 
 ---
@@ -181,9 +182,11 @@ If the SPA is at `tasks.example.com` and the backend at `app.example.com`:
 
 | What | Where | Why |
 |---|---|---|
-| `access_token` / `refresh_token` / `id_token` | `sessionStorage` under `syncora.token` | Cleared on tab close. Matches the security guide's recommendation. |
-| `apiHypermedia` (the `/v2` root) | `sessionStorage` under `syncora.apiHypermedia` | Cached to avoid an extra round-trip on each navigation. Refreshed on tab open. |
-| `loginRequest` (PKCE state) | `sessionStorage` under `syncora.loginRequest` | In-flight only — cleared the moment the code-for-token exchange completes. |
+| `access_token` / `refresh_token` / `id_token` | `localStorage` under `syncora.token` | Persistent sign-in: survives tab close and browser restart, shared across tabs. The access token stays short-lived (15 min) — persistence comes from the `refresh_token` (`offline_access` scope), renewed automatically ~2 min before expiry. |
+| `apiHypermedia` (the `/v2` root) | `localStorage` under `syncora.apiHypermedia` | Cached to avoid an extra round-trip on each navigation. |
+| `loginRequest` (PKCE state) | `sessionStorage` under `syncora.loginRequest` | In-flight only, per-tab — cleared the moment the code-for-token exchange completes. |
+
+Trade-off note: the security guide prefers `sessionStorage` because it's wiped on tab close. We deliberately trade that for persistent sessions (a hard product requirement). Mitigations: tokens remain short-lived opaque tokens, the refresh token is revoked server-side on logout, and a rejected refresh immediately clears local state.
 
 The browser never sees a `client_secret` — PKCE is used instead (per security-guide §4). The platform issues **opaque tokens**, not JWTs, for the Bearer header — JWTs are only present in the `id_token` for identity claims.
 
@@ -223,7 +226,7 @@ If your schema differs, search `src/` and rename. Each field appears in 1–2 pl
 | Stuck on "Couldn't reach the server" | `VITE_BACKEND_URL` wrong or backend down | Open dev tools → Network → check if `/v2/js/restful-2.0.1.js` 200s |
 | Login redirect → "invalid_request" | Redirect URI in registration ≠ actual URL | Update the registration to match `<actual-app-url>#auth` exactly |
 | Login redirect → "Forged 'state' detected" | Multiple login tabs open; sessionStorage stale | Close other tabs and retry. This is the CSRF guard working as intended. |
-| App loads but tasks 401 | Access token expired and refresh failed | Sign out + sign back in. If persistent, check `accessTokenDuration` in `touch-settings.json` |
+| Logged out unexpectedly | `refresh_token` rejected by the backend (revoked, or expired server-side) | Sign back in. The app auto-renews the access token, so a real logout means the refresh token itself died — check the token settings in `touch-settings.json` |
 | App loads but tasks 403 | User lacks access to `tasks` controller | Grant the user's role read access to the tasks data controller in Code On Time |
 | CORS error on login | The redirect URI's origin isn't registered | Re-save the client app registration — CORS entries auto-generate from the redirect URI |
 
@@ -243,7 +246,7 @@ If your schema differs, search `src/` and rename. Each field appears in 1–2 pl
 ## What's intentionally NOT done
 
 - **No JWT validation client-side** — per the security guide, we never trust the `id_token` for authorization, only for display (name/email/avatar). Authorization is enforced server-side via the Bearer token and HATEOAS link visibility.
-- **No localStorage for tokens** — sessionStorage only. Per the security guide.
+- ~~No localStorage for tokens~~ — tokens now live in `localStorage` to support persistent sessions (see *Token storage & security* above for the trade-off and mitigations).
 - **No third-party auth providers** (Auth0, Okta, etc.) — Code On Time *is* the authorization server. If you need to chain to an external IDP, configure that on the backend side.
 
 ---

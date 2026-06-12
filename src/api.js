@@ -10,7 +10,7 @@
  */
 
 import { IS_MOCK } from './config.js';
-import { getApiHypermedia } from './auth.js';
+import { getApiHypermedia, tryRefreshToken } from './auth.js';
 import { SEED } from './mockData.js';
 
 const MOCK_LATENCY = 200;
@@ -18,11 +18,21 @@ const MOCK_LATENCY = 200;
 /* ------------------------------------------------------------ *
  * Thin proxy                                                     *
  * ------------------------------------------------------------ */
-function restful(opts) {
+async function restful(opts) {
   if (IS_MOCK || typeof window.$app === 'undefined' || typeof window.$app.restful !== 'function') {
     return mockRoute(opts);
   }
-  return window.$app.restful(opts);
+  try {
+    return await window.$app.restful(opts);
+  } catch (err) {
+    // Access token expired mid-session — renew via refresh_token and retry
+    // once instead of surfacing a 401 (which used to log the user out).
+    if (err?.code === 401) {
+      const renewed = await tryRefreshToken();
+      if (renewed) return window.$app.restful(opts);
+    }
+    throw err;
+  }
 }
 
 /* ------------------------------------------------------------ *

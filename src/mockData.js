@@ -364,8 +364,62 @@ const taskMessageReads = [
   { taskid: 1000, userid: 8, lastreadmessageid: 6, lastreaddate: hoursAgo(1) },
 ];
 
+/* Attachments — raw `externalDoc*` shape, exactly as /v2/attachments returns.
+ * Hung off the demo task (1000); message-level rows reference real messageids
+ * (3 = Mira's HAR repro, 4 = Aria's audit-log note, 6 = Mira's PR). `externalDoc`
+ * is null here (no real bytes in mock seed) so previews fall back to the striped
+ * placeholder + filename tag. New uploads in `vite dev` get a live object-URL. */
+const attachments = [
+  { attachmentid: 'a0000001-0000-4000-8000-000000000001', taskid: 1000, messageid: 3,
+    externalDocFileName: 'sso-callback-500.har', externalDocLength: 842000,
+    externalDoccontenttype: 'application/json', externalDocstoragepath: null,
+    uploadedbyuserid: 1, uploadedbyuserUsername: 'mira.chen',
+    creationdate: hoursAgo(20), externalDoc: null },
+  { attachmentid: 'a0000002-0000-4000-8000-000000000002', taskid: 1000, messageid: 3,
+    externalDocFileName: 'nameid-null-repro.png', externalDocLength: 318000,
+    externalDoccontenttype: 'image/png', externalDocstoragepath: null,
+    uploadedbyuserid: 1, uploadedbyuserUsername: 'mira.chen',
+    creationdate: hoursAgo(20), externalDoc: null },
+  { attachmentid: 'a0000003-0000-4000-8000-000000000003', taskid: 1000, messageid: 4,
+    externalDocFileName: 'sso-migration-plan.pdf', externalDocLength: 1480000,
+    externalDoccontenttype: 'application/pdf', externalDocstoragepath: null,
+    uploadedbyuserid: 3, uploadedbyuserUsername: 'aria.singh',
+    creationdate: hoursAgo(6), externalDoc: null },
+  { attachmentid: 'a0000004-0000-4000-8000-000000000004', taskid: 1000, messageid: 6,
+    externalDocFileName: 'azure-saml-config.png', externalDocLength: 256000,
+    externalDoccontenttype: 'image/png', externalDocstoragepath: null,
+    uploadedbyuserid: 1, uploadedbyuserUsername: 'mira.chen',
+    creationdate: hoursAgo(2), externalDoc: null },
+  { attachmentid: 'a0000005-0000-4000-8000-000000000005', taskid: 1000, messageid: null,
+    externalDocFileName: 'claimmapper-stacktrace.log', externalDocLength: 47000,
+    externalDoccontenttype: 'text/plain', externalDocstoragepath: null,
+    uploadedbyuserid: 8, uploadedbyuserUsername: 'me',
+    creationdate: hoursAgo(3), externalDoc: null },
+  { attachmentid: 'a0000006-0000-4000-8000-000000000006', taskid: 1000, messageid: null,
+    externalDocFileName: 'RFC-sso-nameid-fallback.docx', externalDocLength: 88000,
+    externalDoccontenttype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    externalDocstoragepath: null, uploadedbyuserid: 1, uploadedbyuserUsername: 'mira.chen',
+    creationdate: daysAgoIso(1), externalDoc: null },
+  { attachmentid: 'a0000007-0000-4000-8000-000000000007', taskid: 1000, messageid: null,
+    externalDocFileName: 'failing-tenants.csv', externalDocLength: 12400,
+    externalDoccontenttype: 'text/csv', externalDocstoragepath: null,
+    uploadedbyuserid: 8, uploadedbyuserUsername: 'me',
+    creationdate: hoursAgo(1), externalDoc: null },
+  { attachmentid: 'a0000008-0000-4000-8000-000000000008', taskid: 1000, messageid: null,
+    externalDocFileName: 'architecture-notes.md', externalDocLength: 21000,
+    externalDoccontenttype: 'text/markdown', externalDocstoragepath: null,
+    uploadedbyuserid: 3, uploadedbyuserUsername: 'aria.singh',
+    creationdate: hoursAgo(8), externalDoc: null },
+  { attachmentid: 'a0000009-0000-4000-8000-000000000009', taskid: 1000, messageid: null,
+    externalDocFileName: 'screenshot-dashboard.png', externalDocLength: 612000,
+    externalDoccontenttype: 'image/png', externalDocstoragepath: null,
+    uploadedbyuserid: 1, uploadedbyuserUsername: 'mira.chen',
+    creationdate: hoursAgo(5), externalDoc: null },
+];
+
 export const SEED = {
   users, orgs, products, modules, taskgroups, tasks,
   userOrgs, userProductsModules, taskAssignees,
   taskActivity, taskMessages, taskMessageReactions, taskMessageMentions, taskMessageReads,
+  attachments,
 };

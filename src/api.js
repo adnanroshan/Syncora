@@ -9,8 +9,8 @@
  * `syncora.apiHypermedia`) are preferred whenever present.
  */
 
-import { IS_MOCK } from './config.js';
-import { getApiHypermedia, tryRefreshToken } from './auth.js';
+import { CONFIG, IS_MOCK } from './config.js';
+import { getApiHypermedia, getToken, tryRefreshToken } from './auth.js';
 import { SEED } from './mockData.js';
 
 const MOCK_LATENCY = 200;
@@ -350,6 +350,171 @@ export async function createActivity({ taskid, userid, activitytype, fieldname =
 }
 
 /* ------------------------------------------------------------ *
+ * Attachments — /v2/attachments (single multipart upload)        *
+ *                                                                *
+ * One table backs both surfaces: messageid==null ⇒ task-level,   *
+ * set ⇒ message-level. The file bytes + metadata go up together  *
+ * in one multipart POST; `attachmentid` is a client-generated    *
+ * UUID so the optimistic card and the persisted row share an id. *
+ * ------------------------------------------------------------ */
+
+export async function listAttachments(taskid) {
+  if (taskid == null) return [];
+  const rows = await restfulAll(`~/v2/attachments?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate`);
+  return rows.map(normalizeAttachment);
+}
+
+export async function createAttachment({
+  taskid, messageid = null, uploadedbyuserid, file, attachmentid, onProgress,
+}) {
+  const id = attachmentid || genUuid();
+
+  if (mockModeOn()) {
+    return mockCreateAttachment({ id, taskid, messageid, uploadedbyuserid, file, onProgress });
+  }
+
+  const fd = new FormData();
+  fd.append('attachmentid', id);
+  fd.append('taskid', String(taskid));
+  fd.append('uploadedbyuserid', String(uploadedbyuserid));
+  if (messageid != null) fd.append('messageid', String(messageid));
+  fd.append('externaldoc', file, file.name);
+
+  const raw = await xhrSend('POST', absUrl('/v2/attachments'), fd, onProgress);
+  return normalizeAttachment(raw);
+}
+
+export async function deleteAttachment(attachmentid) {
+  if (attachmentid == null) return {};
+  if (mockModeOn()) {
+    return mockRoute({ method: 'DELETE', url: `~/v2/attachments/${encodeURIComponent(attachmentid)}` });
+  }
+  const res = await fetch(absUrl('/v2/attachments/' + encodeURIComponent(attachmentid)), {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw mkError(res.status, 'delete_failed', `Delete failed (HTTP ${res.status})`);
+  return {};
+}
+
+/* Resolve a usable object-URL for an attachment, fetching the bytes
+ * with the OAuth token attached (a raw <img>/anchor wouldn't carry it). */
+export async function fetchAttachmentBlobUrl(att) {
+  if (!att?.url) return null;
+  if (mockModeOn() || /^(blob:|data:)/.test(att.url)) return att.url;
+  const res = await fetch(absUrl(att.url), { headers: authHeaders() });
+  if (!res.ok) throw mkError(res.status, 'fetch_failed', `Fetch failed (HTTP ${res.status})`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+/* Absolute, shareable href for "copy link". */
+export function attachmentHref(att) {
+  return att?.url ? absUrl(att.url) : '';
+}
+
+/* Map the backend's `externalDoc*` columns onto the flat UI shape. */
+function normalizeAttachment(r) {
+  if (!r) return r;
+  return {
+    attachmentid: r.attachmentid,
+    taskid:       r.taskid,
+    messageid:    r.messageid ?? null,
+    userid:       r.uploadedbyuserid ?? null,
+    username:     r.uploadedbyuserUsername ?? null,
+    filename:     r.externalDocFileName ?? r.filename ?? '',
+    filesize:     r.externalDocLength ?? r.filesize ?? null,
+    mimetype:     r.externalDoccontenttype ?? r.mimetype ?? null,
+    storagepath:  r.externalDocstoragepath ?? null,
+    url:          r.externalDoc ?? r.url ?? null,
+    creationdate: r.creationdate ?? null,
+    status:       'done',
+  };
+}
+
+function mockModeOn() {
+  return IS_MOCK
+    || typeof window.$app === 'undefined'
+    || typeof window.$app.restful !== 'function';
+}
+
+function genUuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+function absUrl(path) {
+  if (!path) return path;
+  if (/^(https?:|blob:|data:)/.test(path)) return path;
+  return CONFIG.backendUrl + String(path).replace(/^~/, '');
+}
+
+function authHeaders() {
+  const t = getToken();
+  const at = t?.access_token;
+  return at ? { Authorization: 'Bearer ' + at } : {};
+}
+
+/* XHR so we get real upload progress (fetch() can't report it). */
+function xhrSend(method, url, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    Object.entries(authHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(xhr.responseText ? JSON.parse(xhr.responseText) : {}); }
+        catch { resolve({}); }
+      } else {
+        reject(mkError(xhr.status, 'request_failed', xhr.responseText || `HTTP ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(mkError(0, 'network', 'Network error'));
+    xhr.send(body);
+  });
+}
+
+/* Mock upload: fake progress, then persist a raw-shaped row into the
+ * in-memory store using an object-URL for the real bytes. */
+function mockCreateAttachment({ id, taskid, messageid, uploadedbyuserid, file, onProgress }) {
+  const toInt = (v) => (typeof v === 'string' ? parseInt(v, 10) : v);
+  return new Promise((resolve) => {
+    let p = 0;
+    const step = () => {
+      p = Math.min(100, p + 20 + Math.random() * 25);
+      onProgress?.(Math.round(p));
+      if (p < 100) { setTimeout(step, 160); return; }
+      const uid = toInt(uploadedbyuserid);
+      const u = MOCK.users.find(x => x.userid === uid);
+      const raw = {
+        attachmentid:           id,
+        taskid:                 toInt(taskid),
+        messageid:              messageid != null ? toInt(messageid) : null,
+        externalDocFileName:    file?.name || 'file',
+        externalDocLength:      file?.size ?? null,
+        externalDoccontenttype: file?.type || null,
+        externalDocstoragepath: null,
+        uploadedbyuserid:       uid,
+        uploadedbyuserUsername: u?.username || null,
+        creationdate:           new Date().toISOString(),
+        externalDoc:            file ? URL.createObjectURL(file) : null,
+      };
+      MOCK.attachments.push(raw);
+      setTimeout(() => resolve(normalizeAttachment(raw)), MOCK_LATENCY);
+    };
+    setTimeout(step, 160);
+  });
+}
+
+/* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
 export async function loadLookups() {
@@ -417,6 +582,7 @@ const MOCK = {
   taskMessageReactions: (SEED.taskMessageReactions || []).slice(),
   taskMessageMentions:  (SEED.taskMessageMentions || []).slice(),
   taskMessageReads:     (SEED.taskMessageReads || []).slice(),
+  attachments:          (SEED.attachments || []).slice(),
   // Mock notifications for the seed "me" user (userid 8) — mirrors the
   // /v2/notifications row shape from the real backend.
   notifications: [
@@ -813,6 +979,26 @@ function handleMock({ method = 'GET', url, body } = {}) {
     if (i < 0) throw mkError(404, 'not_found', 'Notification not found');
     MOCK.notifications[i] = { ...MOCK.notifications[i], ...body };
     return MOCK.notifications[i];
+  }
+
+  /* ---------- Attachments ---------- */
+  if (method === 'GET' && path === '/v2/attachments') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/taskid=(\d+)/);
+    let rows = MOCK.attachments;
+    if (m) rows = rows.filter(a => a.taskid === parseInt(m[1], 10));
+    rows = [...rows].sort((a, b) => new Date(a.creationdate) - new Date(b.creationdate));
+    return { collection: rows };
+  }
+  if (method === 'POST' && path === '/v2/attachments') {
+    const raw = { ...body };
+    MOCK.attachments.push(raw);
+    return raw;
+  }
+  if (method === 'DELETE' && path.startsWith('/v2/attachments/')) {
+    const id = decodeURIComponent(path.split('/').pop());
+    MOCK.attachments = MOCK.attachments.filter(a => String(a.attachmentid) !== String(id));
+    return {};
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {

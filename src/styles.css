@@ -3552,3 +3552,112 @@ kbd {
   100% { margin-left: 100%; }
 }
 
+
+/* ============================================================
+   LIQUID GLASS theme — third theme alongside light/dark.
+   Philosophy: glass on the CHROME (sidebar, topbar, panel,
+   popovers, toasts), opaque CONTENT (rows, chat, forms) so
+   readability never pays for the looks. An ambient gradient
+   behind the app gives the blur something to refract.
+   ============================================================ */
+[data-theme="glass"] {
+  /* content surfaces stay near-opaque for contrast */
+  --bg:            #EEF0EE;
+  --bg-elev:       rgba(252, 252, 250, 0.62);
+  --surface:       rgba(255, 255, 255, 0.86);
+  --surface-hover: rgba(255, 255, 255, 0.65);
+  --border:        rgba(118, 128, 125, 0.22);
+  --border-strong: rgba(98, 108, 105, 0.34);
+  --text:          #18201D;
+  --text-muted:    #54605B;
+  --text-faint:    #84908B;
+
+  /* glass primitives (chrome only) */
+  --glass-bg:        rgba(252, 253, 252, 0.55);
+  --glass-bg-strong: rgba(253, 254, 253, 0.68);
+  --glass-blur:      blur(26px) saturate(1.65);
+  --glass-edge:      inset 0 1px 0 rgba(255, 255, 255, 0.65),
+                     inset 0 0 0 0.5px rgba(255, 255, 255, 0.35);
+
+  --shadow-pop:   0 12px 32px -8px rgba(28, 40, 36, 0.18), 0 2px 8px rgba(28, 40, 36, 0.08);
+  --shadow-panel: -24px 0 60px -18px rgba(28, 40, 36, 0.22);
+}
+
+/* Ambient refraction field behind everything. */
+[data-theme="glass"] body {
+  background:
+    radial-gradient(900px 600px at 8% -10%,  color-mix(in oklab, var(--accent) 38%, transparent), transparent 62%),
+    radial-gradient(1100px 700px at 105% 12%, rgba(116, 156, 240, 0.42), transparent 64%),
+    radial-gradient(900px 700px at 50% 115%,  rgba(240, 174, 120, 0.38), transparent 62%),
+    radial-gradient(700px 500px at 70% 55%,   rgba(168, 130, 222, 0.16), transparent 60%),
+    linear-gradient(160deg, #F1F4F1, #E7ECE9);
+  background-attachment: fixed;
+}
+
+/* ---- chrome gets the glass ---- */
+[data-theme="glass"] .sidebar,
+[data-theme="glass"] .topbar,
+[data-theme="glass"] .viewtabs {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+[data-theme="glass"] .sidebar { box-shadow: var(--glass-edge); }
+
+[data-theme="glass"] .detail {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-edge), var(--shadow-panel);
+}
+[data-theme="glass"] .detail--center {
+  border: 0.5px solid rgba(255, 255, 255, 0.55);
+  box-shadow: var(--glass-edge), 0 32px 80px -24px rgba(28, 40, 36, 0.35);
+}
+[data-theme="glass"] .detail-head { background: transparent; }
+[data-theme="glass"] .detail-side { background: rgba(255, 255, 255, 0.28); }
+[data-theme="glass"] .detail-scrim { background: rgba(30, 42, 38, 0.22); }
+
+/* floating popovers + menus + toasts */
+[data-theme="glass"] .ddp-pop,
+[data-theme="glass"] .assg-pop,
+[data-theme="glass"] .notif-pop,
+[data-theme="glass"] .usermenu-pop,
+[data-theme="glass"] .fchip-pop,
+[data-theme="glass"] .sidefield-pop,
+[data-theme="glass"] .detail-menu,
+[data-theme="glass"] .subt-assg-pop,
+[data-theme="glass"] .chat-emoji-pop,
+[data-theme="glass"] .toast {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: var(--glass-edge), var(--shadow-pop);
+}
+
+/* content stays calm: rows/cards keep near-opaque surfaces */
+[data-theme="glass"] .row:hover { background: rgba(255, 255, 255, 0.55); }
+[data-theme="glass"] .row.is-selected { background: rgba(255, 255, 255, 0.75); }
+[data-theme="glass"] kbd { background: rgba(255, 255, 255, 0.5); }
+
+/* ---- graceful degradation ----
+   No backdrop-filter support, or the user asked for less
+   transparency → swap the glass primitives for opaque paint.
+   Everything above keeps working, just without the refraction. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-theme="glass"] {
+    --glass-bg:        #F6F7F5;
+    --glass-bg-strong: #FCFCFA;
+    --glass-blur:      none;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme="glass"] {
+    --glass-bg:        #F6F7F5;
+    --glass-bg-strong: #FCFCFA;
+    --glass-blur:      none;
+    --bg-elev:         #F9FAF8;
+    --surface:         #FFFFFF;
+  }
+}

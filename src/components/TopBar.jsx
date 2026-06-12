@@ -22,8 +22,13 @@ export function TopBar({ scopeLabel, scopeSubtitle, onNew, onSearch, search, onT
           />
           <kbd>/</kbd>
         </div>
-        <button className="iconbtn" aria-label="Toggle theme" onClick={onToggleTheme}>
-          <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+        <button
+          className="iconbtn"
+          aria-label="Switch theme"
+          title={`Theme: ${theme || 'light'} — click for ${({ light: 'dark', dark: 'glass', glass: 'light' })[theme] || 'dark'}`}
+          onClick={onToggleTheme}
+        >
+          <Icon name={theme === 'dark' ? 'sparkle' : theme === 'glass' ? 'sun' : 'moon'} size={15} />
         </button>
         <NotificationsBell userid={user?.userid} onOpenTask={onOpenTask} onIncoming={onNotifIncoming}/>
         <button className="btn-primary" onClick={onNew}>

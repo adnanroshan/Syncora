@@ -477,7 +477,7 @@ export default function App({ user, hypermedia, isMock }) {
           onSearch={setSearch}
           search={search}
           theme={prefs.theme}
-          onToggleTheme={() => setPrefs({ theme: prefs.theme === 'dark' ? 'light' : 'dark' })}
+          onToggleTheme={() => setPrefs({ theme: ({ light: 'dark', dark: 'glass', glass: 'light' })[prefs.theme] || 'light' })}
           user={me}
           onLogout={logout}
           onOpenTask={openTask}

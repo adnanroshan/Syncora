@@ -145,6 +145,11 @@ export default function App({ user, hypermedia, isMock }) {
 
   /* Index users by id so tasks can show the assignee's name/avatar. */
   const usersById = useMemo(() => indexBy(lookups.users, u => u.userid), [lookups.users]);
+  const usersByUsername = useMemo(() => {
+    const out = {};
+    (lookups.users || []).forEach(u => { if (u?.username) out[u.username] = u; });
+    return out;
+  }, [lookups.users]);
 
   /* Orgs the user is allowed to see — drives the Sidebar Clients list and
    * the Client picker. Falls back to the full org list while the access
@@ -167,8 +172,16 @@ export default function App({ user, hypermedia, isMock }) {
       if (map.has(r.productid)) return;
       map.set(r.productid, { id: r.productid, productid: r.productid, name: r.productname });
     });
-    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [userProductsModules]);
+    const fromPerms = Array.from(map.values());
+    if (fromPerms.length) {
+      return fromPerms.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+    // Fallback to the global products list when the per-user permission list
+    // is empty/unavailable (mirrors accessibleOrgs → lookups.orgs).
+    return (lookups.products || [])
+      .map(p => ({ id: p.id ?? p.productid, productid: p.id ?? p.productid, name: p.name }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [userProductsModules, lookups.products]);
 
   /* Single object passed to DetailPanel so its prop surface stays small. */
   const detailLookups = useMemo(() => ({
@@ -208,14 +221,22 @@ export default function App({ user, hypermedia, isMock }) {
     () => tasks.map(t => {
       const rows = assigneesByTask[t.taskid] || [];
       const primary = rows.find(r => r.isprimary) || rows[0] || null;
-      const primaryUser = primary ? usersById[primary.assigneduserid] : null;
+      const primaryUser = primary
+        ? (usersById[primary.assigneduserid]
+           || (primary.assignedusername ? { username: primary.assignedusername } : null))
+        : null;
+      // Also honour the task's single `usersusername` assignee (the detail
+      // panel's "Assignee" field) so the grid avatar matches it.
+      const byUsername = t.usersusername
+        ? (usersByUsername[t.usersusername] || { username: t.usersusername })
+        : null;
       return {
         ...t,
         modulename: modulesById[t.moduleid]?.name || t.modulename,
-        assignee: primaryUser || t.assignee || usersById[t.createdbyuserid] || null,
+        assignee: primaryUser || byUsername || t.assignee || usersById[t.createdbyuserid] || null,
       };
     }),
-    [tasks, usersById, assigneesByTask, modulesById],
+    [tasks, usersById, usersByUsername, assigneesByTask, modulesById],
   );
 
   /* Refresh per-task unread counts (called on app load + when the detail
@@ -358,6 +379,7 @@ export default function App({ user, hypermedia, isMock }) {
       productid:       null,
       moduleid:        null,
       createdbyuserid: me?.userid ?? null,
+      usersusername:   me?.username ?? null,
     });
   };
 

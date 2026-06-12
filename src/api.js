@@ -36,12 +36,48 @@ async function restful(opts) {
 }
 
 /* ------------------------------------------------------------ *
+ * Pagination — page=0,1,2,… until a page returns no NEW rows.    *
+ * No fixed `limit`; each page is the backend's default size. A   *
+ * dedupe guard (by self-link/identity) also stops cleanly if the *
+ * backend ignores `page` and repeats the first page (e.g. mock). *
+ * ------------------------------------------------------------ */
+const MAX_PAGES = 1000;
+
+function withPage(url, page) {
+  const [path, qs = ''] = String(url).split('?');
+  const params = qs.split('&').filter(p => p && !/^page=/i.test(p) && !/^limit=/i.test(p));
+  params.push('page=' + page);
+  return `${path}?${params.join('&')}`;
+}
+
+async function restfulAll(baseUrl) {
+  const out = [];
+  const seen = new Set();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const r = await restful({ url: withPage(baseUrl, page) });
+    const rows = r?.collection || [];
+    if (rows.length === 0) break;                       // empty page → done
+    let added = 0;
+    for (const row of rows) {
+      const key = row?._links?.self?.href || JSON.stringify(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+      added++;
+    }
+    if (added === 0) break;                             // no new rows → done
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------ *
  * Public API                                                     *
  * ------------------------------------------------------------ */
 export async function loadEverything() {
-  // ACL gate: refuse early if the user has no access to tasks.
+  // ACL gate: refuse early if the user's hypermedia exposes neither
+  // tasks resource.
   const h = getApiHypermedia();
-  if (!IS_MOCK && h && !h.tasks) {
+  if (!IS_MOCK && h && !h.tasks && !h.tasksfresh) {
     throw mkError(403, 'forbidden', 'You do not have access to tasks.');
   }
   const [tasksPage, lookups, assignees] = await Promise.all([
@@ -53,25 +89,25 @@ export async function loadEverything() {
 }
 
 export async function listTasks() {
-  const url = hypermediaUrl('tasks', '~/v2/tasks');
-  return restful({ url });
+  const url = hypermediaUrl('tasksfresh', '~/v2/tasksfresh');
+  return { collection: await restfulAll(url) };
 }
 
 export async function getTask(taskid) {
-  return restful({ url: `~/v2/tasks/${encodeURIComponent(taskid)}` });
+  return restful({ url: `~/v2/tasksfresh/${encodeURIComponent(taskid)}` });
 }
 
 export async function createTask(data) {
-  return restful({ method: 'POST', url: '~/v2/tasks', body: data });
+  return restful({ method: 'POST', url: '~/v2/tasksfresh', body: data });
 }
 
 export async function patchTask(task, patch) {
-  const url = task?._links?.edit?.href || `~/v2/tasks/${task.taskid}`;
+  const url = task?._links?.edit?.href || `~/v2/tasksfresh/${task.taskid}`;
   return restful({ method: 'PATCH', url, body: patch });
 }
 
 export async function deleteTask(task) {
-  const url = task?._links?.delete?.href || `~/v2/tasks/${task.taskid}`;
+  const url = task?._links?.delete?.href || `~/v2/tasksfresh/${task.taskid}`;
   return restful({ method: 'DELETE', url });
 }
 
@@ -91,32 +127,27 @@ export async function findUserByUsername(username) {
 
 export async function listUserOrgs(userid) {
   if (userid == null) return [];
-  const r = await restful({ url: `~/v2/userorgs?userid=${encodeURIComponent(userid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userorgs?userid=${encodeURIComponent(userid)}`);
 }
 
 export async function listUserProductsModules(userid) {
   if (userid == null) return [];
-  const r = await restful({ url: `~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userproductsmodules?userid=${encodeURIComponent(userid)}`);
 }
 
 export async function listOrgAccessRows(organisationid) {
   if (organisationid == null) return [];
-  const r = await restful({ url: `~/v2/userorgs?organisationid=${encodeURIComponent(organisationid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userorgs?organisationid=${encodeURIComponent(organisationid)}`);
 }
 
 export async function listProductAccessRows(productid) {
   if (productid == null) return [];
-  const r = await restful({ url: `~/v2/userproductsmodules?productid=${encodeURIComponent(productid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/userproductsmodules?productid=${encodeURIComponent(productid)}`);
 }
 
 export async function listAssignees(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskassignees?taskid=${encodeURIComponent(taskid)}` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskassignees?taskid=${encodeURIComponent(taskid)}`);
 }
 
 export async function addAssignee({ taskid, assigneduserid, isprimary = false }) {
@@ -138,21 +169,24 @@ export async function setPrimaryAssignee(taskid, assigneduserid) {
 
 export async function listSubtasks(parenttaskid) {
   if (parenttaskid == null) return [];
-  const r = await restful({ url: `~/v2/tasks?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/tasksfresh?filter=(parenttaskid=${encodeURIComponent(parenttaskid)})`);
 }
 
 export async function listAllAssignees() {
-  try {
-    const r = await restful({ url: '~/v2/taskassignees' });
-    return r?.collection || [];
-  } catch { return []; }
+  try { return await restfulAll('~/v2/taskassignees'); }
+  catch { return []; }
 }
 
 export async function listMyUnread() {
   try {
-    const r = await restful({ url: '~/v2/taskunread' });
-    return r?.collection || [];
+    const rows = await restfulAll('~/v2/taskunread');
+    // Normalize field casing: the backend returns lowercase
+    // `unreadcount`/`mentioncount`; the UI reads camelCase.
+    return rows.map(row => ({
+      ...row,
+      unreadCount:  row.unreadCount  ?? row.unreadcount  ?? 0,
+      mentionCount: row.mentionCount ?? row.mentioncount ?? 0,
+    }));
   } catch { return []; }
 }
 
@@ -162,8 +196,7 @@ export async function listMyUnread() {
 
 export async function listNotifications(userid) {
   if (userid == null) return [];
-  const r = await restful({ url: `~/v2/notifications?filter=(userid%3D${encodeURIComponent(userid)})` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/notifications?filter=(userid%3D${encodeURIComponent(userid)})`);
 }
 
 export async function markNotificationRead(n) {
@@ -181,14 +214,12 @@ export async function markNotificationRead(n) {
 
 export async function listActivity(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate%20desc&limit=100` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskactivity?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate%20desc`);
 }
 
 export async function listMessages(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate&limit=50` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskmessages?filter=(taskid=${encodeURIComponent(taskid)})&sort=creationdate`);
 }
 
 export async function createMessage({ taskid, userid, parentmessageid = null, messagetext }) {
@@ -226,15 +257,13 @@ export async function addMention({ messageid, userid }) {
 export async function listMentionsForMessages(messageids) {
   if (!messageids?.length) return [];
   const list = messageids.map(i => encodeURIComponent(i)).join(',');
-  const r = await restful({ url: `~/v2/taskmessagementions?filter=(messageid%20IN%20(${list}))&limit=200` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskmessagementions?filter=(messageid%20IN%20(${list}))`);
 }
 
 export async function listReactionsForMessages(messageids) {
   if (!messageids?.length) return [];
   const list = messageids.map(i => encodeURIComponent(i)).join(',');
-  const r = await restful({ url: `~/v2/taskmessagereactions?filter=(messageid%20IN%20(${list}))&limit=500` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskmessagereactions?filter=(messageid%20IN%20(${list}))`);
 }
 
 export async function addReaction({ messageid, userid, emoji }) {
@@ -278,8 +307,7 @@ export async function upsertReadMarker(taskid, userid, lastreadmessageid) {
 
 export async function listWatchers(taskid) {
   if (taskid == null) return [];
-  const r = await restful({ url: `~/v2/taskwatchers?filter=(taskid=${encodeURIComponent(taskid)})` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/taskwatchers?filter=(taskid=${encodeURIComponent(taskid)})`);
 }
 
 export async function addWatcher({ taskid, userid }) {
@@ -302,8 +330,7 @@ export async function listManagersOf(userids) {
   const ids = Array.from(new Set((userids || []).filter(id => id != null)));
   if (!ids.length) return [];
   const list = ids.map(encodeURIComponent).join(',');
-  const r = await restful({ url: `~/v2/usersubordinates?filter=(subordinateid%20IN%20(${list}))` });
-  return r?.collection || [];
+  return restfulAll(`~/v2/usersubordinates?filter=(subordinateid%20IN%20(${list}))`);
 }
 
 export async function createNotification({ userid, notificationtype, title, body = null, taskid = null, messageid = null }) {
@@ -339,8 +366,7 @@ export async function loadLookups() {
 async function safeList(resource) {
   try {
     const url = hypermediaUrl(resource, `~/v2/${resource}`);
-    const r = await restful({ url });
-    return r?.collection || [];
+    return await restfulAll(url);
   } catch {
     return [];
   }
@@ -419,7 +445,7 @@ const MOCK = {
 function handleMock({ method = 'GET', url, body } = {}) {
   const path = stripTilde(url).split('?')[0];
 
-  if (method === 'GET' && path === '/v2/tasks') {
+  if (method === 'GET' && path === '/v2/tasksfresh') {
     const q = decodeURIComponent(String(url).split('?')[1] || '');
     const m = q.match(/parenttaskid=(\d+|null)/);
     let rows = MOCK.tasks;
@@ -431,20 +457,20 @@ function handleMock({ method = 'GET', url, body } = {}) {
     }
     return { collection: rows, count: rows.length };
   }
-  if (method === 'GET' && path.startsWith('/v2/tasks/')) {
+  if (method === 'GET' && path.startsWith('/v2/tasksfresh/')) {
     const id = parseInt(path.split('/').pop(), 10);
     const t  = MOCK.tasks.find(x => x.taskid === id);
     if (!t) throw mkError(404, 'not_found', 'Task not found');
     return withLinks(t);
   }
-  if (method === 'POST' && path === '/v2/tasks') {
+  if (method === 'POST' && path === '/v2/tasksfresh') {
     const id = MOCK.nextId++;
     const now = new Date().toISOString();
     const decorated = decorateTask({ ...body, taskid: id, creationdate: now, lastmodifieddate: now });
     MOCK.tasks.unshift(decorated);
     return withLinks(decorated);
   }
-  if (method === 'PATCH' && path.startsWith('/v2/tasks/')) {
+  if (method === 'PATCH' && path.startsWith('/v2/tasksfresh/')) {
     const id = parseInt(path.split('/').pop(), 10);
     const i  = MOCK.tasks.findIndex(x => x.taskid === id);
     if (i < 0) throw mkError(404, 'not_found', 'Task not found');
@@ -452,7 +478,7 @@ function handleMock({ method = 'GET', url, body } = {}) {
     MOCK.tasks[i] = merged;
     return withLinks(merged);
   }
-  if (method === 'DELETE' && path.startsWith('/v2/tasks/')) {
+  if (method === 'DELETE' && path.startsWith('/v2/tasksfresh/')) {
     const id = parseInt(path.split('/').pop(), 10);
     MOCK.tasks = MOCK.tasks.filter(x => x.taskid !== id);
     return {};
@@ -790,7 +816,7 @@ function handleMock({ method = 'GET', url, body } = {}) {
   }
 
   if (method === 'GET' && (path === '/v2' || path === '/v2/')) {
-    return { tasks: { _links: { first: { href: '~/v2/tasks' } } } };
+    return { tasks: { _links: { first: { href: '~/v2/tasksfresh' } } } };
   }
 
   throw mkError(404, 'no_route', `Mock: no route for ${method} ${path}`);
@@ -822,9 +848,9 @@ function withLinks(t) {
   return {
     ...t,
     _links: {
-      self:   { href: `~/v2/tasks/${t.taskid}` },
-      edit:   { href: `~/v2/tasks/${t.taskid}` },
-      delete: { href: `~/v2/tasks/${t.taskid}` },
+      self:   { href: `~/v2/tasksfresh/${t.taskid}` },
+      edit:   { href: `~/v2/tasksfresh/${t.taskid}` },
+      delete: { href: `~/v2/tasksfresh/${t.taskid}` },
     },
   };
 }

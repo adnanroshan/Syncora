@@ -85,6 +85,11 @@ export function DetailPanel({
   const productsById   = useMemo(() => indexBy(lookups?.products,   p => p.id ?? p.productid),      [lookups]);
   const modulesById    = useMemo(() => indexBy(lookups?.modules,    m => m.id ?? m.moduleid),       [lookups]);
   const taskgroupsById = useMemo(() => indexBy(lookups?.taskgroups, g => g.id ?? g.taskgroupid),    [lookups]);
+  const usersByUsername = useMemo(() => {
+    const o = {};
+    (lookups?.users || []).forEach(u => { if (u?.username) o[u.username] = u; });
+    return o;
+  }, [lookups?.users]);
 
   /* Activity rows for this task — drive the completion / verification
    * banner. Re-fetched when `eventsVersion` bumps after a local write. */
@@ -203,22 +208,6 @@ export function DetailPanel({
     bumpEvents();
   };
 
-  const removeAssignee = async () => {
-    if (!task) return;
-    const assigneduserid = task.assignee?.id ?? task.assignee?.usersid ?? task.assigneduserid;
-    if (!assigneduserid) return;
-    const previous = task;
-    setTask({ ...task, assignee: null, usersusername: null });
-    try {
-      const saved = await api.removeAssignee(task.taskid, assigneduserid);
-      setTask(prev => ({ ...prev, ...saved, assignee: null, usersusername: null }));
-      onAfterPatch?.({ ...previous, ...saved, assignee: null, usersusername: null });
-    } catch (err) {
-      setTask(previous);
-      alert('Could not remove assignee: ' + prettyErr(err));
-    }
-  };
-
   const onSaveTitle = () => {
     setEditingTitle(false);
     if (titleDraft !== task?.title) patch('title', titleDraft);
@@ -263,14 +252,24 @@ export function DetailPanel({
       if (map.has(r.moduleid)) return;
       map.set(r.moduleid, { value: r.moduleid, label: r.modulename });
     });
-    return Array.from(map.values()).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-  }, [lookups?.userProductsModules, task?.productid]);
+    const fromPerms = Array.from(map.values());
+    if (fromPerms.length) {
+      return fromPerms.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    }
+    // Fallback to the global modules for this product when the per-user
+    // permission list is empty/unavailable.
+    return (lookups?.modules || [])
+      .filter(m => (m.productid ?? m.productId) === task.productid)
+      .map(m => ({ value: m.moduleid ?? m.id, label: m.name ?? m.modulename }))
+      .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  }, [lookups?.userProductsModules, lookups?.modules, task?.productid]);
 
   /* "Can the user create any task at all?" — used to gate the Create
    * button in draft mode with a tooltip explaining why it's disabled. */
   const canCreate = useMemo(
-    () => (lookups?.userProductsModules || []).some(r => r.canwrite),
-    [lookups?.userProductsModules],
+    () => (lookups?.userProductsModules || []).some(r => r.canwrite)
+      || (lookups?.accessibleProducts?.length || 0) > 0,
+    [lookups?.userProductsModules, lookups?.accessibleProducts],
   );
 
   if (!taskId && !isDraft) return null;
@@ -280,7 +279,11 @@ export function DetailPanel({
   const mod   = task ? modulesById[task.moduleid]     : null;
   const group = task ? taskgroupsById[task.taskgroupid] : null;
   const status = task ? normaliseStatus(task.status) : null;
-  const assignee = task ? (usersById?.[task.createdbyuserid] || null) : null;
+  // The single "Assignee" field is the task's denormalized assignee
+  // (`usersusername`) — display and edit must read/write the SAME field.
+  const assignee = task?.usersusername
+    ? (usersByUsername[task.usersusername] || { username: task.usersusername })
+    : null;
 
   return (
     <>
@@ -513,7 +516,7 @@ export function DetailPanel({
                 />
               </SideField>
 
-              <SideField label="Assigner">
+              <SideField label="Assignee">
                 <FieldPickerButton
                   open={openPicker === 'assignee'}
                   onToggle={() => setOpenPicker(openPicker === 'assignee' ? null : 'assignee')}
@@ -527,8 +530,7 @@ export function DetailPanel({
                   options={[{ value: '', label: 'Unassigned' }, ...(lookups?.users || []).map(u => ({ value: u.username, label: u.username }))]}
                   onPick={(v) => {
                     setOpenPicker(null);
-                    if (!v) removeAssignee();
-                    else patch('usersusername', v);
+                    patch('usersusername', v || null);
                   }}
                   render={(opt) => <><Avatar name={opt.value || '·'} size={16}/><span>{opt.label}</span></>}
                 />

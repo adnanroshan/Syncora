@@ -15,14 +15,19 @@ import {
 } from './Shared.jsx';
 import { DueDatePicker } from './DueDatePicker.jsx';
 import { AssigneesField } from './AssigneesField.jsx';
+import { WatchersField } from './WatchersField.jsx';
 import { Subtasks } from './Subtasks.jsx';
 import { ActivityDiscussion } from './ActivityDiscussion.jsx';
+import {
+  ACT, NOTIF, logActivity, notifyUsers, notifyTaskAudience,
+  addManagersAsWatchers,
+} from '../notify.js';
 
 export function DetailPanel({
   taskId, draftTask, creating,
   onClose, onNavigate, onDiscardDraft, onCommitDraft,
   allTasks, lookups, usersById, currentUser, api, onAfterPatch, onAfterDelete,
-  panelMode = 'side', onPanelMode,
+  panelMode = 'side', onPanelMode, focusMessageId,
 }) {
   const isDraft = !!draftTask;
   const [task, setTask]     = useState(null);
@@ -81,18 +86,53 @@ export function DetailPanel({
   const modulesById    = useMemo(() => indexBy(lookups?.modules,    m => m.id ?? m.moduleid),       [lookups]);
   const taskgroupsById = useMemo(() => indexBy(lookups?.taskgroups, g => g.id ?? g.taskgroupid),    [lookups]);
 
+  /* Activity rows for this task — drive the completion / verification
+   * banner. Re-fetched when `eventsVersion` bumps after a local write. */
+  const [events, setEvents] = useState([]);
+  const [eventsVersion, setEventsVersion] = useState(0);
+  const bumpEvents = () => setEventsVersion(v => v + 1);
+  useEffect(() => {
+    if (isDraft || !taskId) { setEvents([]); return; }
+    let cancelled = false;
+    api.listActivity(taskId)
+      .then(rows => { if (!cancelled) setEvents(rows || []); })
+      .catch(() => { if (!cancelled) setEvents([]); });
+    return () => { cancelled = true; };
+  }, [api, taskId, isDraft, eventsVersion]);
+
+  /* Rows come back newest-first. Completion = most recent 'Completed';
+   * verifications = distinct verifiers SINCE that completion (a reopened
+   * then re-completed task starts verification from scratch). */
+  const completion = useMemo(
+    () => events.find(e => e.activitytype === ACT.Completed) || null,
+    [events],
+  );
+  const verifications = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    for (const e of events) {
+      if (e.activitytype === ACT.Completed) break;
+      if (e.activitytype === ACT.Verified && e.userid != null && !seen.has(e.userid)) {
+        seen.add(e.userid);
+        out.push(e);
+      }
+    }
+    return out;
+  }, [events]);
+
   /* Field-change helper. In draft mode it just updates local state. In
-   * saved mode it does an optimistic PATCH against the backend. */
+   * saved mode it does an optimistic PATCH against the backend.
+   * Returns true when the change stuck (drives activity side-effects). */
   const patch = async (key, value) => patchMany({ [key]: value });
 
   /* Multi-key variant — used when one user action needs to update two
    * fields atomically (e.g. changing the product also clears the
    * module so we never end up with a mismatched pair on the wire). */
   const patchMany = async (changes) => {
-    if (!task) return;
+    if (!task) return false;
     if (isDraft) {
       setTask(t => ({ ...t, ...changes }));
-      return;
+      return true;
     }
     const before = task;
     const optimistic = { ...task, ...changes };
@@ -101,10 +141,66 @@ export function DetailPanel({
       const saved = await api.patchTask(before, changes);
       setTask(p => ({ ...p, ...saved }));
       onAfterPatch?.({ ...before, ...changes, ...saved });
+      return true;
     } catch (err) {
       setTask(before);
       alert('Could not save: ' + prettyErr(err));
+      return false;
     }
+  };
+
+  const meId = currentUser?.userid;
+  const meName = currentUser?.name || currentUser?.username || 'Someone';
+
+  /* Status changes carry workflow side-effects: activity rows for the
+   * audit trail, completion stamping, and notification fan-out. */
+  const changeStatus = async (v) => {
+    if (!task) return;
+    const prevRaw = task.status;
+    const prevNorm = normaliseStatus(prevRaw);
+    if (v === prevNorm) return;
+    const ok = await patch('status', v);
+    if (!ok || isDraft) return;
+    logActivity({
+      taskid: task.taskid, userid: meId, activitytype: ACT.StatusChanged,
+      fieldname: 'status', oldvalue: prevRaw, newvalue: v,
+    });
+    if (v === 'done') {
+      await logActivity({
+        taskid: task.taskid, userid: meId, activitytype: ACT.Completed,
+        description: `Completed by ${meName}`,
+      });
+      notifyTaskAudience(task, {
+        actorId: meId, notificationtype: NOTIF.TaskCompleted,
+        title: `Task completed: ${task.title}`,
+        body: `Completed by ${meName} — awaiting verification`,
+      });
+    } else if (prevNorm === 'done' || prevNorm === 'verified') {
+      await logActivity({
+        taskid: task.taskid, userid: meId, activitytype: ACT.Reopened,
+        description: `Reopened by ${meName}`,
+      });
+    }
+    bumpEvents();
+  };
+
+  /* Verification — multiple people can verify a completed task; each
+   * gets a 'Verified' activity row, and the first one moves the task's
+   * status from done → verified. */
+  const verifyTask = async () => {
+    if (!task || meId == null) return;
+    if (verifications.some(e => e.userid === meId)) return;
+    await logActivity({
+      taskid: task.taskid, userid: meId, activitytype: ACT.Verified,
+      description: `Verified by ${meName}`,
+    });
+    if (normaliseStatus(task.status) !== 'verified') await patch('status', 'verified');
+    notifyTaskAudience(task, {
+      actorId: meId, notificationtype: NOTIF.TaskVerified,
+      title: `Task verified: ${task.title}`,
+      body: `Verified by ${meName}`,
+    });
+    bumpEvents();
   };
 
   const removeAssignee = async () => {
@@ -314,6 +410,30 @@ export function DetailPanel({
                   </h1>
                 )}
 
+                {!isDraft && (status === 'done' || status === 'verified') && (
+                  <div className={`complete-banner ${status === 'verified' ? 'is-verified' : ''}`}>
+                    <StatusGlyph status={status} size={18}/>
+                    <div className="complete-info">
+                      <div className="complete-line">
+                        {completion
+                          ? <>Completed by <b>{usersById?.[completion.userid]?.name || usersById?.[completion.userid]?.username || `user ${completion.userid}`}</b> · {fmtFullDateTime(completion.creationdate)}</>
+                          : 'Completed'}
+                      </div>
+                      <div className="complete-verifs">
+                        {verifications.length === 0
+                          ? 'Awaiting verification'
+                          : <>Verified by <b>{verifications.map(v => usersById?.[v.userid]?.name || usersById?.[v.userid]?.username || `user ${v.userid}`).join(', ')}</b> ({verifications.length})</>}
+                      </div>
+                    </div>
+                    {meId != null && !verifications.some(v => v.userid === meId) && (
+                      <button className="btn-primary complete-verify-btn" onClick={verifyTask} title="Confirm this task is done correctly">
+                        <Icon name="check-all" size={13}/>
+                        <span>Verify</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <DescriptionBlock task={task} onSave={(v) => patch('description', v)} />
 
                 <Subtasks
@@ -331,6 +451,8 @@ export function DetailPanel({
                     usersById={usersById}
                     lookups={lookups}
                     api={api}
+                    refreshKey={eventsVersion}
+                    focusMessageId={focusMessageId}
                   />
                 )}
               </>
@@ -356,7 +478,7 @@ export function DetailPanel({
                     { value: 'blocked',    label: 'Blocked' },
                     { value: 'done',       label: 'Done' },
                   ]}
-                  onPick={(v) => { patch('status', v); setOpenPicker(null); }}
+                  onPick={(v) => { changeStatus(v); setOpenPicker(null); }}
                   render={(opt) => <><StatusGlyph status={opt.value} size={12}/><span>{opt.label}</span></>}
                 />
               </SideField>
@@ -378,7 +500,15 @@ export function DetailPanel({
                     { value: 'medium', label: 'Medium' },
                     { value: 'low',    label: 'Low' },
                   ]}
-                  onPick={(v) => { patch('priority', v); setOpenPicker(null); }}
+                  onPick={async (v) => {
+                    setOpenPicker(null);
+                    const old = task.priority;
+                    const ok = await patch('priority', v);
+                    if (ok && !isDraft && v !== old) {
+                      logActivity({ taskid: task.taskid, userid: meId, activitytype: ACT.PriorityChanged, fieldname: 'priority', oldvalue: old, newvalue: v });
+                      bumpEvents();
+                    }
+                  }}
                   render={(opt) => <><PriorityMark priority={opt.value}/><span>{opt.label}</span></>}
                 />
               </SideField>
@@ -407,7 +537,14 @@ export function DetailPanel({
               <SideField label="Due date">
                 <DueDatePicker
                   value={task.duedate}
-                  onChange={(iso) => patch('duedate', iso)}
+                  onChange={async (iso) => {
+                    const old = task.duedate;
+                    const ok = await patch('duedate', iso);
+                    if (ok && !isDraft && iso !== old) {
+                      logActivity({ taskid: task.taskid, userid: meId, activitytype: ACT.DueDateChanged, fieldname: 'duedate', oldvalue: old, newvalue: iso });
+                      bumpEvents();
+                    }
+                  }}
                 />
               </SideField>
 
@@ -494,6 +631,50 @@ export function DetailPanel({
                   usersById={usersById}
                   api={api}
                   disabled={isDraft}
+                  onAssigned={(userid) => {
+                    const uname = usersById?.[userid]?.username || `user ${userid}`;
+                    logActivity({ taskid: task.taskid, userid: meId, activitytype: ACT.AssigneeAdded, newvalue: String(userid), description: `${uname} assigned by ${meName}` });
+                    notifyUsers([userid], {
+                      actorId: meId, notificationtype: NOTIF.TaskAssigned,
+                      title: `You were assigned: ${task.title}`,
+                      body: `Assigned by ${meName}`,
+                      taskid: task.taskid,
+                    });
+                    // Managers of both the assigner and the assignee watch the task.
+                    addManagersAsWatchers(task.taskid, [userid, meId]);
+                    bumpEvents();
+                  }}
+                  onUnassigned={(userid) => {
+                    const uname = usersById?.[userid]?.username || `user ${userid}`;
+                    logActivity({ taskid: task.taskid, userid: meId, activitytype: ACT.AssigneeRemoved, oldvalue: String(userid), description: `${uname} unassigned by ${meName}` });
+                    bumpEvents();
+                  }}
+                />
+              </SideField>
+
+              <SideField label="Watchers">
+                <WatchersField
+                  taskId={isDraft ? null : task.taskid}
+                  users={lookups?.users || []}
+                  usersById={usersById}
+                  api={api}
+                  disabled={isDraft}
+                  onWatcherAdded={(userid) => {
+                    const uname = usersById?.[userid]?.username || `user ${userid}`;
+                    logActivity({ taskid: task.taskid, userid: meId, activitytype: ACT.WatcherAdded, newvalue: String(userid), description: `${uname} added as watcher by ${meName}` });
+                    notifyUsers([userid], {
+                      actorId: meId, notificationtype: NOTIF.WatcherAdded,
+                      title: `You're watching: ${task.title}`,
+                      body: `Added by ${meName}`,
+                      taskid: task.taskid,
+                    });
+                    bumpEvents();
+                  }}
+                  onWatcherRemoved={(userid) => {
+                    const uname = usersById?.[userid]?.username || `user ${userid}`;
+                    logActivity({ taskid: task.taskid, userid: meId, activitytype: ACT.WatcherRemoved, oldvalue: String(userid), description: `${uname} removed from watchers by ${meName}` });
+                    bumpEvents();
+                  }}
                 />
               </SideField>
 

@@ -1781,6 +1781,93 @@ kbd {
 .notif-item-when { white-space: nowrap; margin-left: auto; }
 
 /* ============================================================
+ * Live notification toasts
+ * ============================================================ */
+.toast-host {
+  position: fixed;
+  right: 16px; bottom: 16px;
+  z-index: 250;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+}
+.toast {
+  display: flex; align-items: flex-start;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: toast-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.toast-body {
+  flex: 1; min-width: 0;
+  display: flex; align-items: flex-start; gap: 10px;
+  background: transparent; border: none;
+  text-align: left;
+  padding: 10px 4px 10px 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.toast-body:hover { background: var(--surface-hover); }
+.toast-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+.toast-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toast-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.toast-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.toast-close {
+  flex: none;
+  background: transparent; border: none;
+  padding: 8px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.toast-close:hover { color: var(--text); }
+
+/* ============================================================
+ * Completion / verification banner (detail panel)
+ * ============================================================ */
+.complete-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin: 4px 0 16px 0;
+  padding: 10px 12px;
+  border: 0.5px solid var(--status-done-text);
+  background: var(--status-done-bg, var(--surface-hover));
+  border-radius: 9px;
+}
+.complete-info { flex: 1; min-width: 0; }
+.complete-line {
+  font-size: 12.5px;
+  color: var(--text);
+}
+.complete-verifs {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.complete-verify-btn { flex: none; }
+
+/* ============================================================
  * Due-date picker
  * ============================================================ */
 
@@ -2684,6 +2771,15 @@ kbd {
   background: var(--danger-bg);
   border-radius: 999px;
   font-size: 10px;
+}
+
+/* Deep-link highlight — applied briefly when a notification/toast
+ * jumps to a specific message. */
+.chat-msg-flash { animation: msg-flash 2.6s ease; }
+@keyframes msg-flash {
+  0%   { background: var(--accent-bg); box-shadow: 0 0 0 1.5px var(--accent); }
+  60%  { background: var(--accent-bg); box-shadow: 0 0 0 1.5px var(--accent); }
+  100% { background: transparent; box-shadow: none; }
 }
 
 .chat-msg {

@@ -8,13 +8,14 @@ export function normaliseStatus(s) {
   const v = (s || '').toLowerCase();
   if (v === 'todo' || v === 'to_do' || v === 'open')              return 'todo';
   if (v === 'inprogress' || v === 'in_progress' || v === 'doing') return 'inprogress';
+  if (v === 'verified')                                           return 'verified';
   if (v === 'done' || v === 'completed' || v === 'closed')        return 'done';
   if (v === 'blocked')                                            return 'blocked';
   return 'other';
 }
 
 export function statusLabel(s) {
-  return ({ todo:'To do', inprogress:'In progress', done:'Done', blocked:'Blocked', other:'Other' })[s] || s;
+  return ({ todo:'To do', inprogress:'In progress', done:'Done', verified:'Verified', blocked:'Blocked', other:'Other' })[s] || s;
 }
 
 export function labelize(s) {

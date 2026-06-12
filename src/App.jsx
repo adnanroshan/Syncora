@@ -10,6 +10,8 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 
 import * as api from './api.js';
 import { logout } from './auth.js';
+import { ACT, NOTIF, logActivity, notifyTaskAudience, addManagersAsWatchers } from './notify.js';
+import { ToastHost } from './components/Notifications.jsx';
 import { Sidebar }     from './components/Sidebar.jsx';
 import { TopBar }      from './components/TopBar.jsx';
 import { ViewTabs }    from './components/ViewTabs.jsx';
@@ -32,6 +34,11 @@ export default function App({ user, hypermedia, isMock }) {
   const [filters, setFilters]       = useState({ status: null, priority: null, assignee: null });
   const [selectedId, setSelectedId] = useState(null);
   const [calAnchor, setCalAnchor]   = useState(new Date());
+  // Deep-link target inside the open task's discussion (from a
+  // notification or live toast click).
+  const [focusMessageId, setFocusMessageId] = useState(null);
+  // Live notification popups.
+  const [toasts, setToasts] = useState([]);
 
   /* ------- data ------- */
   const [tasks, setTasks]     = useState([]);
@@ -307,6 +314,33 @@ export default function App({ user, hypermedia, isMock }) {
     setTasks(prev => prev.filter(t => t.taskid !== deletedTask.taskid));
   }, []);
 
+  /* Open a task from a notification or toast — optionally focusing a
+   * specific message in its discussion. */
+  const openTask = useCallback((taskid, messageid = null) => {
+    setDraftTask(null);
+    setFocusMessageId(messageid ?? null);
+    setSelectedId(taskid);
+  }, []);
+
+  const onToastIncoming = useCallback((fresh) => {
+    setToasts(prev => {
+      const seen = new Set(prev.map(t => t.notificationid));
+      const add = fresh.filter(n => !seen.has(n.notificationid));
+      // newest on top, cap the stack at 4
+      return [...add, ...prev].slice(0, 4);
+    });
+  }, []);
+
+  const dismissToast = useCallback((notificationid) => {
+    setToasts(prev => prev.filter(t => t.notificationid !== notificationid));
+  }, []);
+
+  const onToastOpen = useCallback((n) => {
+    dismissToast(n.notificationid);
+    api.markNotificationRead(n).catch(() => {});
+    if (n.taskid != null) openTask(n.taskid, n.messageid ?? null);
+  }, [dismissToast, openTask]);
+
   /* "New task" no longer POSTs. It opens an in-memory draft in the detail
    * panel. The POST fires later, when the user clicks the Create button. */
   const onNewTask = () => {
@@ -339,6 +373,28 @@ export default function App({ user, hypermedia, isMock }) {
       setTasks(prev => [decorated, ...prev]);
       setDraftTask(null);
       setSelectedId(decorated.taskid);
+
+      /* Workflow side-effects (best-effort, never block the create):
+       * audit row, creator's manager auto-watches, then notify the
+       * task's audience (watchers — assignees join via the panel and
+       * get their own Task Assigned notifications there). */
+      const meName = me?.name || me?.username || 'Someone';
+      logActivity({
+        taskid: created.taskid, userid: me?.userid, activitytype: ACT.Created,
+        description: `Task created by ${meName}`,
+      });
+      (async () => {
+        await addManagersAsWatchers(created.taskid, [me?.userid]);
+        notifyTaskAudience(
+          { ...created, createdbyuserid: created.createdbyuserid ?? me?.userid },
+          {
+            actorId: me?.userid, notificationtype: NOTIF.TaskCreated,
+            title: `New task: ${created.title}`,
+            body: `Created by ${meName}`,
+          },
+        );
+      })().catch(() => {});
+
       return decorated;
     } catch (err) {
       alert('Could not create task: ' + prettyErr(err));
@@ -346,7 +402,7 @@ export default function App({ user, hypermedia, isMock }) {
     } finally {
       setCreating(false);
     }
-  }, [creating, usersById]);
+  }, [creating, usersById, me]);
 
   /* ------- keyboard shortcuts ------- */
   useEffect(() => {
@@ -414,7 +470,8 @@ export default function App({ user, hypermedia, isMock }) {
           onToggleTheme={() => setPrefs({ theme: prefs.theme === 'dark' ? 'light' : 'dark' })}
           user={me}
           onLogout={logout}
-          onOpenTask={(taskid) => { setDraftTask(null); setSelectedId(taskid); }}
+          onOpenTask={openTask}
+          onNotifIncoming={onToastIncoming}
         />
         <ViewTabs
           view={view} onChange={setView}
@@ -447,8 +504,9 @@ export default function App({ user, hypermedia, isMock }) {
         taskId={selectedId}
         draftTask={draftTask}
         creating={creating}
-        onClose={() => { setSelectedId(null); refreshUnread(); }}
-        onNavigate={setSelectedId}
+        focusMessageId={focusMessageId}
+        onClose={() => { setSelectedId(null); setFocusMessageId(null); refreshUnread(); }}
+        onNavigate={(id) => { setFocusMessageId(null); setSelectedId(id); }}
         onDiscardDraft={onDiscardDraft}
         onCommitDraft={onCommitDraft}
         allTasks={filteredTasks}
@@ -461,6 +519,8 @@ export default function App({ user, hypermedia, isMock }) {
         panelMode={prefs.panelMode}
         onPanelMode={(m) => setPrefs({ panelMode: m })}
       />
+
+      <ToastHost toasts={toasts} onDismiss={dismissToast} onOpen={onToastOpen}/>
     </div>
   );
 }

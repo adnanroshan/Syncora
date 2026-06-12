@@ -3,7 +3,7 @@ import { Icon } from './Icons.jsx';
 import { Avatar } from './Shared.jsx';
 import { NotificationsBell } from './Notifications.jsx';
 
-export function TopBar({ scopeLabel, scopeSubtitle, onNew, onSearch, search, onToggleTheme, theme, user, onLogout, onOpenTask }) {
+export function TopBar({ scopeLabel, scopeSubtitle, onNew, onSearch, search, onToggleTheme, theme, user, onLogout, onOpenTask, onNotifIncoming }) {
   return (
     <header className="topbar">
       <div className="topbar-crumbs">
@@ -25,7 +25,7 @@ export function TopBar({ scopeLabel, scopeSubtitle, onNew, onSearch, search, onT
         <button className="iconbtn" aria-label="Toggle theme" onClick={onToggleTheme}>
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
         </button>
-        <NotificationsBell userid={user?.userid} onOpenTask={onOpenTask}/>
+        <NotificationsBell userid={user?.userid} onOpenTask={onOpenTask} onIncoming={onNotifIncoming}/>
         <button className="btn-primary" onClick={onNew}>
           <Icon name="plus" size={13} />
           <span>New task</span>

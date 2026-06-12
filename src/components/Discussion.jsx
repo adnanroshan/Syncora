@@ -294,6 +294,7 @@ function Message({
 export function Discussion({
   messages, reactions, lastReadMessageId, currentUser, usersById,
   taskAssignees = [], onSend, onEdit, onSoftDelete, onToggleReaction, onMarkRead,
+  focusMessageId,
 }) {
   const usersByUsername = useMemo(() => {
     const out = {};
@@ -361,6 +362,22 @@ export function Discussion({
     }
   }, [sorted.length]);
 
+  /* Deep-link focus: scroll the requested message into view and flash
+   * it. Each message is wrapped in a display:contents div carrying
+   * data-mid, so we can find its rendered node without touching layout. */
+  useEffect(() => {
+    if (focusMessageId == null) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const host = scroller.querySelector(`[data-mid="${focusMessageId}"]`);
+    const el = host?.firstElementChild;
+    if (!el) return;
+    el.scrollIntoView({ block: 'center' });
+    el.classList.add('chat-msg-flash');
+    const t = setTimeout(() => el.classList.remove('chat-msg-flash'), 2600);
+    return () => clearTimeout(t);
+  }, [focusMessageId, sorted.length]);
+
   /* Debounced read-marker upsert. */
   const markedRef = useRef(false);
   useEffect(() => {
@@ -407,19 +424,20 @@ export function Discussion({
     }
 
     rendered.push(
-      <Message
-        key={m.messageid}
-        message={m}
-        currentUser={currentUser}
-        usersById={usersById}
-        usersByUsername={usersByUsername}
-        mentionCandidates={mentionCandidates}
-        reactions={reactionsByMessage[m.messageid] || []}
-        onReply={() => setReplyTo(m.messageid)}
-        onEdit={onEdit}
-        onDelete={onSoftDelete}
-        onToggleReaction={onToggleReaction}
-      />,
+      <div key={m.messageid} style={{ display: 'contents' }} data-mid={m.messageid}>
+        <Message
+          message={m}
+          currentUser={currentUser}
+          usersById={usersById}
+          usersByUsername={usersByUsername}
+          mentionCandidates={mentionCandidates}
+          reactions={reactionsByMessage[m.messageid] || []}
+          onReply={() => setReplyTo(m.messageid)}
+          onEdit={onEdit}
+          onDelete={onSoftDelete}
+          onToggleReaction={onToggleReaction}
+        />
+      </div>,
     );
 
     const childReplies = repliesByParent[m.messageid] || [];
@@ -427,19 +445,20 @@ export function Discussion({
       rendered.push(
         <div key={`thread-${m.messageid}`} className="chat-thread">
           {childReplies.map(r => (
-            <Message
-              key={r.messageid}
-              message={r}
-              currentUser={currentUser}
-              usersById={usersById}
-              usersByUsername={usersByUsername}
-              mentionCandidates={mentionCandidates}
-              reactions={reactionsByMessage[r.messageid] || []}
-              onEdit={onEdit}
-              onDelete={onSoftDelete}
-              onToggleReaction={onToggleReaction}
-              isReply
-            />
+            <div key={r.messageid} style={{ display: 'contents' }} data-mid={r.messageid}>
+              <Message
+                message={r}
+                currentUser={currentUser}
+                usersById={usersById}
+                usersByUsername={usersByUsername}
+                mentionCandidates={mentionCandidates}
+                reactions={reactionsByMessage[r.messageid] || []}
+                onEdit={onEdit}
+                onDelete={onSoftDelete}
+                onToggleReaction={onToggleReaction}
+                isReply
+              />
+            </div>
           ))}
           {replyTo === m.messageid && (
             <div className="chat-reply-composer">

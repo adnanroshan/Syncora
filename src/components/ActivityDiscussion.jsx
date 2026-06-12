@@ -7,6 +7,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Icon } from './Icons.jsx';
 import { ActivityFeed } from './ActivityFeed.jsx';
 import { Discussion } from './Discussion.jsx';
+import { NOTIF, notifyUsers, getTaskAudience, snippet } from '../notify.js';
 
 const MENTION_RE = /@([a-zA-Z0-9_.\-]+)/g;
 
@@ -16,11 +17,16 @@ function prettyErr(err) {
   return err.message || String(err);
 }
 
-export function ActivityDiscussion({ task, currentUser, usersById, lookups, api }) {
+export function ActivityDiscussion({ task, currentUser, usersById, lookups, api, refreshKey, focusMessageId }) {
   const taskId = task?.taskid;
   const meId   = currentUser?.userid;
 
   const [tab, setTab]               = useState('discussion');
+
+  /* Deep-link from a notification/toast: land on the Discussion tab. */
+  useEffect(() => {
+    if (focusMessageId != null) setTab('discussion');
+  }, [focusMessageId]);
   const [activity, setActivity]     = useState([]);
   const [messages, setMessages]     = useState([]);
   const [reactions, setReactions]   = useState([]);
@@ -56,7 +62,7 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
     })();
 
     return () => { cancelled = true; };
-  }, [taskId, meId, api]);
+  }, [taskId, meId, api, refreshKey]);
 
   const lastReadMessageId = readMarker?.lastreadmessageid ?? null;
 
@@ -99,11 +105,32 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
 
       /* Best-effort mention extraction + POST. */
       const tokens = Array.from(new Set((text.match(MENTION_RE) || []).map(s => s.slice(1))));
+      const mentionIds = [];
       for (const username of tokens) {
         const u = usersByUsername[username];
         if (!u?.userid) continue;
+        mentionIds.push(u.userid);
         api.addMention({ messageid: saved.messageid, userid: u.userid }).catch(() => {});
       }
+
+      /* Notification fan-out: mentioned users get a Mention, the rest of
+       * the task's audience (creator + assignees + watchers) a Message. */
+      const meName = currentUser?.name || currentUser?.username || 'Someone';
+      notifyUsers(mentionIds, {
+        actorId: meId, notificationtype: NOTIF.Mention,
+        title: `${meName} mentioned you in: ${task.title}`,
+        body: snippet(text),
+        taskid: taskId, messageid: saved.messageid,
+      });
+      getTaskAudience(task).then(audience => {
+        mentionIds.forEach(id => audience.delete(id));
+        notifyUsers(audience, {
+          actorId: meId, notificationtype: NOTIF.Message,
+          title: `New message in: ${task.title}`,
+          body: `${meName}: ${snippet(text)}`,
+          taskid: taskId, messageid: saved.messageid,
+        });
+      }).catch(() => {});
     } catch (err) {
       setMessages(prev => prev.filter(m => m.messageid !== optimisticId));
       alert('Could not send message: ' + prettyErr(err));
@@ -234,6 +261,7 @@ export function ActivityDiscussion({ task, currentUser, usersById, lookups, api 
         <Discussion
           messages={messages}
           reactions={reactions}
+          focusMessageId={focusMessageId}
           lastReadMessageId={lastReadMessageId}
           currentUser={currentUser}
           usersById={usersById}

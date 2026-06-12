@@ -154,6 +154,12 @@ Matches your existing `tasks.html` / `taskdetail.html`. No backend changes beyon
 | Update task | `PATCH` | `~/v2/tasks/:id` *(or `_links.edit.href`)* |
 | Delete task | `DELETE` | `~/v2/tasks/:id` *(or `_links.delete.href`)* |
 | Lookups | `GET` | `~/v2/organisation`, `~/v2/products`, `~/v2/modules`, `~/v2/taskgroups`, `~/v2/users` |
+| Watchers | `GET`/`POST`/`DELETE` | `~/v2/taskwatchers` *(composite key `taskid,userid`)* |
+| Managers | `GET` | `~/v2/usersubordinates?filter=(subordinateid IN (…))` |
+| Notifications | `GET`/`POST`/`PATCH` | `~/v2/notifications` — the SPA fans out one row per recipient per event |
+| Activity log | `GET`/`POST` | `~/v2/taskactivity` — the SPA writes rows for create/status/complete/verify/assign/watch/due-date/priority |
+
+**Workflow conventions** (no schema changes needed): completion is recorded as a `Completed` activity row (who + when); verification as `Verified` activity rows — multiple verifiers each get one, and the first moves `tasks.status` from `done` to `verified`. Managers (from `usersubordinates`) are auto-added as watchers when their reports create or are assigned tasks. Note: the DB trigger `fn_taskassignees_add_watchers` adds the assignee's *subordinates* as watchers — the manager direction is handled client-side.
 
 `api.js` prefers the **hypermedia links** from the user-filtered `/v2` root (saved in session as `syncora.apiHypermedia`) before falling back to the hard-coded URLs above. This means if a user lacks access to `tasks`, the app refuses *before* even calling the endpoint — matching the HATEOAS-driven ACL described in the security guide.
 

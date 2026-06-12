@@ -153,6 +153,30 @@ function renderActivity(a, usersById) {
   if (type.includes('attach') || field.includes('attach')) {
     return { tone: 'muted', icon: 'paperclip', line: <>{name}<span> attached </span><span className="act-val">{a.newvalue || 'a file'}</span></> };
   }
+  if (type.includes('watcher')) {
+    const target = usersById[a.newvalue] || usersById[a.oldvalue] || null;
+    const removing = type.includes('removed');
+    return {
+      tone: removing ? 'muted' : 'accent',
+      icon: 'bell',
+      line: (<>{name}<span> {removing ? 'removed' : 'added'}</span>{' '}
+        {target && <><Avatar user={target} name={target.username} size={14}/>{' '}
+        <b style={{ fontWeight: 500 }}>{target.name || target.username}</b></>}
+        <span> {removing ? 'from watchers' : 'as watcher'}</span></>),
+    };
+  }
+  if (type.includes('verif')) {
+    return { tone: 'success', icon: 'check-all', line: <>{name}<span> verified this task</span></> };
+  }
+  if (type.includes('complet')) {
+    return { tone: 'success', icon: 'check', line: <>{name}<span> completed this task</span></> };
+  }
+  if (type.includes('reopen')) {
+    return { tone: 'warn', icon: 'history', line: <>{name}<span> reopened this task</span></> };
+  }
+  if (type.includes('created')) {
+    return { tone: 'accent', icon: 'sparkle', line: <>{name}<span> created this task</span></> };
+  }
   return {
     tone: 'muted', icon: 'edit',
     line: (<>{name}<span> changed </span>

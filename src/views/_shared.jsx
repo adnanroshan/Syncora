@@ -9,6 +9,7 @@ export const STATUSES = [
   { key: 'inprogress', label: 'In progress', sort: 1 },
   { key: 'blocked',    label: 'Blocked',     sort: 2 },
   { key: 'done',       label: 'Done',        sort: 3 },
+  { key: 'verified',   label: 'Verified',    sort: 4 },
 ];
 
 export const PRIO_RANK = { urgent: 0, high: 1, medium: 2, low: 3 };

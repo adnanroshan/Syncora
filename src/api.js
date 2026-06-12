@@ -273,6 +273,56 @@ export async function upsertReadMarker(taskid, userid, lastreadmessageid) {
 }
 
 /* ------------------------------------------------------------ *
+ * Watchers, managers, notifications fan-out, activity log        *
+ * ------------------------------------------------------------ */
+
+export async function listWatchers(taskid) {
+  if (taskid == null) return [];
+  const r = await restful({ url: `~/v2/taskwatchers?filter=(taskid=${encodeURIComponent(taskid)})` });
+  return r?.collection || [];
+}
+
+export async function addWatcher({ taskid, userid }) {
+  try {
+    return await restful({ method: 'POST', url: '~/v2/taskwatchers', body: { taskid, userid } });
+  } catch (err) {
+    if (err?.code === 409) return null; // already watching — fine
+    throw err;
+  }
+}
+
+export async function removeWatcher(taskid, userid) {
+  const key = `${encodeURIComponent(taskid)},${encodeURIComponent(userid)}`;
+  return restful({ method: 'DELETE', url: `~/v2/taskwatchers/${key}` });
+}
+
+/** Manager rows for a set of users: usersubordinates where subordinateid IN (…).
+ *  Returns [{ managerid, subordinateid }]. */
+export async function listManagersOf(userids) {
+  const ids = Array.from(new Set((userids || []).filter(id => id != null)));
+  if (!ids.length) return [];
+  const list = ids.map(encodeURIComponent).join(',');
+  const r = await restful({ url: `~/v2/usersubordinates?filter=(subordinateid%20IN%20(${list}))` });
+  return r?.collection || [];
+}
+
+export async function createNotification({ userid, notificationtype, title, body = null, taskid = null, messageid = null }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/notifications',
+    body: { userid, notificationtype, title, body, taskid, messageid },
+  });
+}
+
+export async function createActivity({ taskid, userid, activitytype, fieldname = null, oldvalue = null, newvalue = null, description = null }) {
+  return restful({
+    method: 'POST',
+    url: '~/v2/taskactivity',
+    body: { taskid, userid, activitytype, fieldname, oldvalue, newvalue, description },
+  });
+}
+
+/* ------------------------------------------------------------ *
  * Lookups — plain GET /v2/<resource>, no field filter            *
  * ------------------------------------------------------------ */
 export async function loadLookups() {
@@ -328,6 +378,14 @@ const MOCK = {
   userOrgs:             SEED.userOrgs.slice(),
   userProductsModules:  SEED.userProductsModules.slice(),
   taskAssignees:        (SEED.taskAssignees || []).slice(),
+  taskWatchers:         [
+    { taskid: SEED.tasks[0]?.taskid, userid: 2, creationdate: new Date().toISOString() },
+  ],
+  // managerid → subordinateid. User 1 manages the mock "me" (8); 8 manages 3.
+  userSubordinates:     [
+    { managerid: 1, subordinateid: 8 },
+    { managerid: 8, subordinateid: 3 },
+  ],
   taskActivity:         (SEED.taskActivity || []).slice(),
   taskMessages:         (SEED.taskMessages || []).slice(),
   taskMessageReactions: (SEED.taskMessageReactions || []).slice(),
@@ -659,7 +717,57 @@ function handleMock({ method = 'GET', url, body } = {}) {
     return { collection: Array.from(byTask.values()) };
   }
 
+  /* ---------- Watchers ---------- */
+  if (method === 'GET' && path === '/v2/taskwatchers') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/taskid=(\d+)/);
+    let rows = MOCK.taskWatchers;
+    if (m) rows = rows.filter(r => r.taskid === parseInt(m[1], 10));
+    return { collection: rows };
+  }
+  if (method === 'POST' && path === '/v2/taskwatchers') {
+    const exists = MOCK.taskWatchers.some(r => r.taskid === body.taskid && r.userid === body.userid);
+    if (exists) throw mkError(409, 'duplicate', 'Already watching');
+    const row = { taskid: body.taskid, userid: body.userid, creationdate: new Date().toISOString() };
+    MOCK.taskWatchers.push(row);
+    return row;
+  }
+  if (method === 'DELETE' && path.startsWith('/v2/taskwatchers/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [t, u] = key.split(',').map(s => parseInt(s, 10));
+    MOCK.taskWatchers = MOCK.taskWatchers.filter(r => !(r.taskid === t && r.userid === u));
+    return {};
+  }
+
+  /* ---------- Manager lookups ---------- */
+  if (method === 'GET' && path === '/v2/usersubordinates') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const inMatch = q.match(/subordinateid\s+IN\s+\(([^)]+)\)/i);
+    const eqMatch = q.match(/subordinateid=(\d+)/);
+    let rows = MOCK.userSubordinates;
+    if (inMatch) {
+      const ids = inMatch[1].split(',').map(s => parseInt(s.trim(), 10));
+      rows = rows.filter(r => ids.includes(r.subordinateid));
+    } else if (eqMatch) {
+      rows = rows.filter(r => r.subordinateid === parseInt(eqMatch[1], 10));
+    }
+    return { collection: rows };
+  }
+
+  /* ---------- Activity (write) ---------- */
+  if (method === 'POST' && path === '/v2/taskactivity') {
+    const row = { activityid: MOCK.nextActivityId++, creationdate: new Date().toISOString(), ...body };
+    MOCK.taskActivity.push(row);
+    return row;
+  }
+
   /* ---------- Notifications ---------- */
+  if (method === 'POST' && path === '/v2/notifications') {
+    const id = Math.max(0, ...MOCK.notifications.map(n => n.notificationid)) + 1;
+    const row = { notificationid: id, isread: false, readdate: null, creationdate: new Date().toISOString(), ...body };
+    MOCK.notifications.push(row);
+    return row;
+  }
   if (method === 'GET' && path === '/v2/notifications') {
     const q = decodeURIComponent(String(url).split('?')[1] || '');
     const m = q.match(/userid=(\d+)/);
@@ -731,3 +839,10 @@ function mkError(code, reason, message) {
 }
 
 export const __isMock = () => IS_MOCK;
+
+/* Dev-only escape hatch: lets the console / UI tests simulate events
+ * coming from OTHER users (e.g. push a notification row and watch the
+ * live toast appear). Mock mode only — never defined in production. */
+if (IS_MOCK && typeof window !== 'undefined') {
+  window.__syncoraMock = MOCK;
+}

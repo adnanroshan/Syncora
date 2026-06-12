@@ -31,6 +31,7 @@ const VIEWPORT_MARGIN = 8;
 export function AssigneesField({
   taskId, organisationid, productid, moduleid,
   users = [], usersById = {}, api, onChange, disabled = false,
+  onAssigned, onUnassigned,
 }) {
   const [assignees, setAssignees] = useState([]);
   const [loading, setLoading]     = useState(false);
@@ -185,6 +186,7 @@ export function AssigneesField({
     broadcast(optimistic);
     try {
       await api.addAssignee({ taskid: taskId, assigneduserid: userid, isprimary: isFirst });
+      onAssigned?.(userid);
       const fresh = await api.listAssignees(taskId);
       broadcast(Array.isArray(fresh) ? fresh : optimistic);
     } catch (err) {
@@ -200,6 +202,7 @@ export function AssigneesField({
     broadcast(remaining);
     try {
       await api.removeAssignee(taskId, userid);
+      onUnassigned?.(userid);
       if (wasPrimary && remaining.length) {
         await api.setPrimaryAssignee(taskId, remaining[0].assigneduserid);
       }

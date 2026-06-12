@@ -95,6 +95,15 @@ export function StatusGlyph({ status, size = 14 }) {
           <path d="M8 8l8 8M16 8l-8 8" stroke="var(--status-blocked-text)" strokeWidth="1.75" strokeLinecap="round"/>
         </svg>
       );
+    case 'verified':
+      /* done + outer ring — completion that has been checked off by a verifier */
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="10" fill="none" stroke="var(--status-done-text)" strokeWidth="1.5"/>
+          <circle cx="12" cy="12" r="7" fill="var(--status-done-text)"/>
+          <path d="M8.5 12l2.5 2.5 4.5-5" stroke="white" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
     default:
       return <svg {...common}><circle cx="12" cy="12" r="8" fill="none" stroke="var(--text-faint)" strokeWidth="1.75"/></svg>;
   }

@@ -46,6 +46,7 @@ export function ViewTabs({ view, onChange, counts, sortBy, onSort, groupBy, onGr
             { value: 'inprogress', label: 'In progress' },
             { value: 'blocked',    label: 'Blocked' },
             { value: 'done',       label: 'Done' },
+            { value: 'verified',   label: 'Verified' },
           ]}
           onPick={(v) => pick({ status: v })}
         />

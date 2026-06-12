@@ -10,15 +10,18 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../api.js';
 import { Icon } from './Icons.jsx';
 
-const POLL_MS = 60 * 1000;
+const POLL_MS = 20 * 1000;
 
-export function NotificationsBell({ userid, onOpenTask }) {
+export function NotificationsBell({ userid, onOpenTask, onIncoming }) {
   const [open, setOpen]   = useState(false);
   const [items, setItems] = useState([]);
   const rootRef = useRef(null);
   // Bumped on every refresh AND on optimistic updates, so an in-flight
   // fetch that resolves late can't clobber newer state with stale rows.
   const seqRef = useRef(0);
+  // High-water mark for live toasts: null until the first load completes
+  // so a fresh session doesn't toast the whole backlog.
+  const lastSeenRef = useRef(null);
 
   const refresh = useCallback(async () => {
     if (userid == null) { setItems([]); return; }
@@ -28,8 +31,17 @@ export function NotificationsBell({ userid, onOpenTask }) {
       if (seq !== seqRef.current) return; // superseded
       rows.sort((a, b) => new Date(b.creationdate) - new Date(a.creationdate));
       setItems(rows);
+
+      const maxId = rows.reduce((m, r) => Math.max(m, r.notificationid || 0), 0);
+      if (lastSeenRef.current == null) {
+        lastSeenRef.current = maxId;
+      } else if (maxId > lastSeenRef.current) {
+        const fresh = rows.filter(r => r.notificationid > lastSeenRef.current && !r.isread);
+        lastSeenRef.current = maxId;
+        if (fresh.length) onIncoming?.(fresh);
+      }
     } catch { /* swallow — the bell just stays empty */ }
-  }, [userid]);
+  }, [userid, onIncoming]);
 
   /* Initial load + background poll. */
   useEffect(() => {
@@ -67,7 +79,7 @@ export function NotificationsBell({ userid, onOpenTask }) {
     markRead(n);
     if (n.taskid != null && onOpenTask) {
       setOpen(false);
-      onOpenTask(n.taskid);
+      onOpenTask(n.taskid, n.messageid ?? null);
     }
   };
 
@@ -128,6 +140,48 @@ export function NotificationsBell({ userid, onOpenTask }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ *
+ * Live toasts — popups for notifications that arrive while the   *
+ * app is open. Clicking one opens the task (and focuses the      *
+ * message when the notification points at one).                  *
+ * ------------------------------------------------------------ */
+const TOAST_TTL_MS = 8000;
+
+export function ToastHost({ toasts, onDismiss, onOpen }) {
+  /* Auto-dismiss each toast after its TTL. */
+  useEffect(() => {
+    if (!toasts.length) return;
+    const timers = toasts.map(t =>
+      setTimeout(() => onDismiss(t.notificationid), TOAST_TTL_MS)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [toasts, onDismiss]);
+
+  if (!toasts.length) return null;
+  return (
+    <div className="toast-host" aria-live="polite">
+      {toasts.map(t => (
+        <div key={t.notificationid} className="toast" role="status">
+          <button
+            className="toast-body"
+            onClick={() => onOpen(t)}
+            title={t.taskid != null ? 'Open task' : undefined}
+          >
+            <span className="toast-icon"><Icon name={t.messageid != null ? 'chat' : 'bell'} size={14}/></span>
+            <span className="toast-text">
+              <span className="toast-title">{t.title || t.notificationtype}</span>
+              {t.body && <span className="toast-sub">{t.body}</span>}
+            </span>
+          </button>
+          <button className="toast-close" onClick={() => onDismiss(t.notificationid)} aria-label="Dismiss">
+            <Icon name="close" size={12}/>
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

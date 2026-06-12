@@ -87,25 +87,26 @@ export default function App({ user, hypermedia, isMock }) {
       return { username: 'me', userid: 8, name: 'You', hue: 165, isMe: true };
     }
     if (!user) return null;
-    const candidates = [
-      user?.raw?.preferred_username,
-      user?.email,
-      user?.sub,
-      user?.name,
-    ].filter(Boolean).map(s => String(s).toLowerCase());
+    // The login handle from the id_token is authoritative for the current user.
+    const handle = user?.raw?.preferred_username || user?.raw?.unique_name || null;
+    const subId  = user?.sub != null ? String(user.sub) : null;
+    const subNum = subId != null && /^\d+$/.test(subId) ? Number(subId) : null;
+    const textCandidates = [handle, user?.email].filter(Boolean).map(s => String(s).toLowerCase());
+    // Match the backend row by userid (sub) first, then by handle/email.
     const matched = (lookups.users || []).find(u => {
-      const fields = [u.username, u.email, u.name].filter(Boolean).map(s => String(s).toLowerCase());
-      return fields.some(f => candidates.includes(f));
+      if (subId != null && String(u.userid) === subId) return true;
+      const fields = [u.username, u.email].filter(Boolean).map(s => String(s).toLowerCase());
+      return fields.some(f => textCandidates.includes(f));
     });
-    const username = matched?.username
-      || user?.raw?.preferred_username
-      || user?.email
-      || user?.sub
-      || null;
+    // Display the login handle; only fall back to backend/token name if absent.
+    const username = handle || matched?.username || user?.email || subId || null;
     return {
       username,
-      userid:   matched?.userid ?? meUserId ?? null,
-      name:     matched?.name || user.name,
+      // The token's `sub` IS the numeric userid in this backend — trust it
+      // over the fuzzy lookups match (which was resolving to admin/userid 1
+      // once the users list loaded, flipping me.userid to 1).
+      userid:   subNum ?? matched?.userid ?? meUserId ?? null,
+      name:     username || matched?.name || user.name,
       email:    user.email,
       picture:  user.picture,
       hue:      hashHue(username),
@@ -131,14 +132,14 @@ export default function App({ user, hypermedia, isMock }) {
   useEffect(() => {
     if (me?.userid == null) { setUserOrgs([]); setUserProductsModules([]); return; }
     let cancelled = false;
-    Promise.all([
-      api.listUserOrgs(me.userid),
-      api.listUserProductsModules(me.userid),
-    ]).then(([o, p]) => {
-      if (cancelled) return;
-      setUserOrgs(o);
-      setUserProductsModules(p);
-    });
+    // Fetch independently — one failing call must not discard the other's
+    // result (a failing /v2/userorgs was silently wiping the product list).
+    api.listUserOrgs(me.userid)
+      .then(o => { if (!cancelled) setUserOrgs(o || []); })
+      .catch(() => { if (!cancelled) setUserOrgs([]); });
+    api.listUserProductsModules(me.userid)
+      .then(p => { if (!cancelled) setUserProductsModules(p || []); })
+      .catch(() => { if (!cancelled) setUserProductsModules([]); });
     return () => { cancelled = true; };
   }, [me?.userid]);
 

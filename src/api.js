@@ -191,6 +191,33 @@ export async function listMyUnread() {
 }
 
 /* ------------------------------------------------------------ *
+ * Verifications — one row per verifier per task                  *
+ * ------------------------------------------------------------ */
+
+export async function listVerifications(taskid) {
+  if (taskid == null) return [];
+  return restfulAll(`~/v2/taskverifications?filter=(taskid=${encodeURIComponent(taskid)})`);
+}
+
+export async function addVerification({ taskid, userid }) {
+  try {
+    return await restful({ method: 'POST', url: '~/v2/taskverifications', body: { taskid, userid } });
+  } catch (err) {
+    if (err?.code === 409) return null; // already verified — fine
+    throw err;
+  }
+}
+
+/** Reopening a completed task starts a fresh verification cycle. */
+export async function clearVerifications(taskid) {
+  const rows = await listVerifications(taskid).catch(() => []);
+  await Promise.all(rows.map(r => {
+    const key = `${encodeURIComponent(r.taskid)},${encodeURIComponent(r.userid)}`;
+    return restful({ method: 'DELETE', url: `~/v2/taskverifications/${key}` }).catch(() => {});
+  }));
+}
+
+/* ------------------------------------------------------------ *
  * Notifications                                                  *
  * ------------------------------------------------------------ */
 
@@ -569,6 +596,7 @@ const MOCK = {
   userOrgs:             SEED.userOrgs.slice(),
   userProductsModules:  SEED.userProductsModules.slice(),
   taskAssignees:        (SEED.taskAssignees || []).slice(),
+  taskVerifications:    [],
   taskWatchers:         [
     { taskid: SEED.tasks[0]?.taskid, userid: 2, creationdate: new Date().toISOString() },
   ],
@@ -907,6 +935,28 @@ function handleMock({ method = 'GET', url, body } = {}) {
       byTask.set(m.taskid, cur);
     }
     return { collection: Array.from(byTask.values()) };
+  }
+
+  /* ---------- Verifications ---------- */
+  if (method === 'GET' && path === '/v2/taskverifications') {
+    const q = decodeURIComponent(String(url).split('?')[1] || '');
+    const m = q.match(/taskid=(\d+)/);
+    let rows = MOCK.taskVerifications;
+    if (m) rows = rows.filter(r => r.taskid === parseInt(m[1], 10));
+    return { collection: rows };
+  }
+  if (method === 'POST' && path === '/v2/taskverifications') {
+    const exists = MOCK.taskVerifications.some(r => r.taskid === body.taskid && r.userid === body.userid);
+    if (exists) throw mkError(409, 'duplicate', 'Already verified');
+    const row = { taskid: body.taskid, userid: body.userid, verifieddate: new Date().toISOString() };
+    MOCK.taskVerifications.push(row);
+    return row;
+  }
+  if (method === 'DELETE' && path.startsWith('/v2/taskverifications/')) {
+    const key = decodeURIComponent(path.split('/').pop());
+    const [t, u] = key.split(',').map(x => parseInt(x, 10));
+    MOCK.taskVerifications = MOCK.taskVerifications.filter(r => !(r.taskid === t && r.userid === u));
+    return {};
   }
 
   /* ---------- Watchers ---------- */

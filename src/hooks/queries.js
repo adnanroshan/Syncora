@@ -194,6 +194,20 @@ export function useWatchers(taskId, { enabled = true } = {}) {
   });
 }
 
+/* Verifiers of the open task — polled with the activity cadence so other
+ * users' verifications appear in the banner live. */
+export function useVerifications(taskId, { enabled = true, paused = false } = {}) {
+  const visible = usePageVisible();
+  const on = enabled && taskId != null;
+  return useQuery({
+    queryKey: qk.verifications(taskId),
+    queryFn: () => api.listVerifications(taskId),
+    enabled: on,
+    refetchInterval: (visible && on && !paused) ? POLL.activity : false,
+    staleTime: 4_000,
+  });
+}
+
 export function useAttachments(taskId, { enabled = true, paused = false } = {}) {
   const visible = usePageVisible();
   const on = enabled && taskId != null;

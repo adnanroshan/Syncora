@@ -12,6 +12,7 @@ export const qk = {
   allAssignees: () => ['assignees', 'all'],
   assignees:    (taskId) => ['assignees', taskId],
   watchers:     (taskId) => ['watchers', taskId],
+  verifications: (taskId) => ['verifications', taskId],
   unread:       () => ['unread'],
   notifications: (userid) => ['notifications', userid],
   userOrgs:     (userid) => ['userOrgs', userid],

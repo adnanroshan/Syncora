@@ -36,7 +36,7 @@ import {
   addManagersAsWatchers,
 } from '../notify.js';
 import { qk } from '../queryKeys.js';
-import { useActivity, useAttachments } from '../hooks/queries.js';
+import { useActivity, useAttachments, useVerifications } from '../hooks/queries.js';
 
 const EMPTY_ATTS = [];
 
@@ -232,14 +232,24 @@ export function DetailPanel({
   const events = activityQ.data || EMPTY_ATTS;
   const bumpEvents = () => queryClient.invalidateQueries({ queryKey: qk.activity(taskId) });
 
-  /* Rows come back newest-first. Completion = most recent 'Completed';
-   * verifications = distinct verifiers SINCE that completion (a reopened
-   * then re-completed task starts verification from scratch). */
-  const completion = useMemo(
-    () => events.find(e => e.activitytype === ACT.Completed) || null,
-    [events],
-  );
+  /* Completion comes straight off the task row (tasks.completedbyuserid /
+   * completeddate); verifications from the taskverifications table. Both
+   * fall back to the legacy activity-derived values for rows that predate
+   * the schema migration (or while the tasksfresh view lacks the columns). */
+  const verificationsQ = useVerifications(taskId, { enabled: !isDraft && taskId != null });
+
+  const completion = useMemo(() => {
+    if (task?.completeddate) {
+      return { userid: task.completedbyuserid, creationdate: task.completeddate };
+    }
+    return events.find(e => e.activitytype === ACT.Completed) || null;
+  }, [task?.completeddate, task?.completedbyuserid, events]);
+
   const verifications = useMemo(() => {
+    if (verificationsQ.data && !verificationsQ.isError) {
+      return verificationsQ.data.map(r => ({ userid: r.userid, creationdate: r.verifieddate }));
+    }
+    // Legacy fallback: distinct 'Verified' activity rows since the last completion.
     const out = [];
     const seen = new Set();
     for (const e of events) {
@@ -250,7 +260,7 @@ export function DetailPanel({
       }
     }
     return out;
-  }, [events]);
+  }, [verificationsQ.data, verificationsQ.isError, events]);
 
   /* Field-change helper. In draft mode it just updates local state. In
    * saved mode it does an optimistic PATCH against the backend.
@@ -291,7 +301,14 @@ export function DetailPanel({
     const prevRaw = task.status;
     const prevNorm = normaliseStatus(prevRaw);
     if (v === prevNorm) return;
-    const ok = await patch('status', v);
+    const wasComplete = prevNorm === 'done' || prevNorm === 'verified';
+    // Completion stamps live on the task row itself — write them in the
+    // same PATCH as the status so the two can never disagree.
+    const changes =
+      v === 'done'   ? { status: v, completedbyuserid: meId, completeddate: new Date().toISOString() }
+      : wasComplete  ? { status: v, completedbyuserid: null, completeddate: null }
+      : { status: v };
+    const ok = await patchMany(changes);
     if (!ok || isDraft) return;
     logActivity({
       taskid: task.taskid, userid: meId, activitytype: ACT.StatusChanged,
@@ -307,7 +324,11 @@ export function DetailPanel({
         title: `Task completed: ${task.title}`,
         body: `Completed by ${meName} — awaiting verification`,
       });
-    } else if (prevNorm === 'done' || prevNorm === 'verified') {
+    } else if (wasComplete) {
+      // Reopening starts a fresh verification cycle.
+      api.clearVerifications(task.taskid)
+        .then(() => queryClient.invalidateQueries({ queryKey: qk.verifications(task.taskid) }))
+        .catch(() => {});
       await logActivity({
         taskid: task.taskid, userid: meId, activitytype: ACT.Reopened,
         description: `Reopened by ${meName}`,
@@ -322,7 +343,14 @@ export function DetailPanel({
   const verifyTask = async () => {
     if (!task || meId == null) return;
     if (verifications.some(e => e.userid === meId)) return;
-    await logActivity({
+    try {
+      await api.addVerification({ taskid: task.taskid, userid: meId });
+    } catch (err) {
+      alert('Could not verify: ' + prettyErr(err));
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: qk.verifications(task.taskid) });
+    logActivity({
       taskid: task.taskid, userid: meId, activitytype: ACT.Verified,
       description: `Verified by ${meName}`,
     });
